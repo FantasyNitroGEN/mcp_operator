@@ -57,7 +57,6 @@ jobs:
               ],
               "ignore_labels": ["ignore-for-release"],
               "sort": "ASC",
-              "template": "${{CHANGELOG}}",
               "pr_template": "- ${{TITLE}} (#${{NUMBER}})"
             }
         env:
