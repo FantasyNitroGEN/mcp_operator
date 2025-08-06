@@ -15,6 +15,10 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
   HELM_VERSION: v3.14.0
 
