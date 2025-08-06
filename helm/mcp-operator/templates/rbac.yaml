@@ -1,0 +1,284 @@
+{{- if .Values.rbac.create }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "mcp-operator.serviceAccountName" . }}
+  namespace: {{ include "mcp-operator.namespace" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+  {{- with .Values.operator.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: true
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "mcp-operator.managerRoleName" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+rules:
+# MCPServer resources
+- apiGroups:
+  - mcp.io
+  resources:
+  - mcpservers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mcp.io
+  resources:
+  - mcpservers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - mcp.io
+  resources:
+  - mcpservers/status
+  verbs:
+  - get
+  - patch
+  - update
+# MCPServerBackup resources
+- apiGroups:
+  - mcp.io
+  resources:
+  - mcpserverbackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - mcp.io
+  resources:
+  - mcpserverbackups/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - mcp.io
+  resources:
+  - mcpserverbackups/status
+  verbs:
+  - get
+  - patch
+  - update
+# Core resources
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Apps resources
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Autoscaling resources
+- apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Networking resources
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Batch resources for backups
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Events for logging
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+{{- with .Values.rbac.rules }}
+# Additional custom rules
+{{- toYaml . | nindent 0 }}
+{{- end }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "mcp-operator.managerRoleName" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "mcp-operator.managerRoleName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "mcp-operator.serviceAccountName" . }}
+  namespace: {{ include "mcp-operator.namespace" . }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "mcp-operator.leaderElectionRoleName" . }}
+  namespace: {{ include "mcp-operator.namespace" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "mcp-operator.leaderElectionRoleName" . }}
+  namespace: {{ include "mcp-operator.namespace" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "mcp-operator.leaderElectionRoleName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "mcp-operator.serviceAccountName" . }}
+  namespace: {{ include "mcp-operator.namespace" . }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "mcp-operator.metricsReaderRoleName" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+rules:
+- nonResourceURLs:
+  - "/metrics"
+  verbs:
+  - get
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "mcp-operator.proxyRoleName" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+{{- end }}

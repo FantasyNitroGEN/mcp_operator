@@ -1,0 +1,104 @@
+{{- if .Values.webhook.enabled }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionWebhook
+metadata:
+  name: {{ include "mcp-operator.webhookConfigName" . }}-validating
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+  {{- if .Values.webhook.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ include "mcp-operator.namespace" . }}/{{ include "mcp-operator.webhookCertSecretName" . }}
+  {{- end }}
+webhooks:
+- name: vmcpserver.kb.io
+  clientConfig:
+    service:
+      name: {{ include "mcp-operator.webhookServiceName" . }}
+      namespace: {{ include "mcp-operator.namespace" . }}
+      path: /validate-mcp-io-v1-mcpserver
+    {{- if not .Values.webhook.certManager.enabled }}
+    caBundle: {{ include "mcp-operator.webhookCABundle" . }}
+    {{- end }}
+  rules:
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: ["mcp.io"]
+    apiVersions: ["v1"]
+    resources: ["mcpservers"]
+  admissionReviewVersions: {{ include "mcp-operator.webhookAdmissionReviewVersions" . }}
+  sideEffects: {{ include "mcp-operator.webhookSideEffects" . }}
+  failurePolicy: {{ include "mcp-operator.webhookFailurePolicy" . }}
+  timeoutSeconds: {{ include "mcp-operator.webhookTimeoutSeconds" . }}
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionWebhook
+metadata:
+  name: {{ include "mcp-operator.webhookConfigName" . }}-mutating
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+  {{- if .Values.webhook.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ include "mcp-operator.namespace" . }}/{{ include "mcp-operator.webhookCertSecretName" . }}
+  {{- end }}
+webhooks:
+- name: mmcpserver.kb.io
+  clientConfig:
+    service:
+      name: {{ include "mcp-operator.webhookServiceName" . }}
+      namespace: {{ include "mcp-operator.namespace" . }}
+      path: /mutate-mcp-io-v1-mcpserver
+    {{- if not .Values.webhook.certManager.enabled }}
+    caBundle: {{ include "mcp-operator.webhookCABundle" . }}
+    {{- end }}
+  rules:
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: ["mcp.io"]
+    apiVersions: ["v1"]
+    resources: ["mcpservers"]
+  admissionReviewVersions: {{ include "mcp-operator.webhookAdmissionReviewVersions" . }}
+  sideEffects: {{ include "mcp-operator.webhookSideEffects" . }}
+  failurePolicy: {{ include "mcp-operator.webhookFailurePolicy" . }}
+  timeoutSeconds: {{ include "mcp-operator.webhookTimeoutSeconds" . }}
+
+{{- if .Values.webhook.certManager.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "mcp-operator.webhookCertSecretName" . }}
+  namespace: {{ include "mcp-operator.namespace" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+spec:
+  secretName: {{ include "mcp-operator.webhookCertSecretName" . }}
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  subject:
+    organizations:
+    - mcp-operator
+  commonName: {{ include "mcp-operator.webhookServiceName" . }}.{{ include "mcp-operator.namespace" . }}.svc
+  dnsNames:
+  - {{ include "mcp-operator.webhookServiceName" . }}
+  - {{ include "mcp-operator.webhookServiceName" . }}.{{ include "mcp-operator.namespace" . }}
+  - {{ include "mcp-operator.webhookServiceName" . }}.{{ include "mcp-operator.namespace" . }}.svc
+  - {{ include "mcp-operator.webhookServiceName" . }}.{{ include "mcp-operator.namespace" . }}.svc.cluster.local
+  issuerRef:
+    name: {{ .Values.webhook.certManager.issuerRef.name }}
+    kind: {{ .Values.webhook.certManager.issuerRef.kind }}
+    {{- if .Values.webhook.certManager.issuerRef.group }}
+    group: {{ .Values.webhook.certManager.issuerRef.group }}
+    {{- end }}
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "mcp-operator.fullname" . }}-selfsigned-issuer
+  namespace: {{ include "mcp-operator.namespace" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+{{- end }}
+{{- end }}

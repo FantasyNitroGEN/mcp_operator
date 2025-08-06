@@ -1,0 +1,24 @@
+apiVersion: v2
+name: mcp-operator
+description: A Helm chart for MCP (Model Context Protocol) Operator
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/your-org/mcp-operator
+sources:
+  - https://github.com/your-org/mcp-operator
+maintainers:
+  - name: MCP Operator Team
+    email: mcp-operator@your-org.com
+keywords:
+  - mcp
+  - model-context-protocol
+  - operator
+  - kubernetes
+  - ai
+  - llm
+annotations:
+  category: AI/ML
+  licenses: Apache-2.0
+kubeVersion: ">=1.19.0"
+dependencies: []
