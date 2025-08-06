@@ -51,7 +51,7 @@ MCP (Model Context Protocol) Operator - это Kubernetes-оператор, ко
 
 1. Склонируйте репозиторий:
 ```bash
-git clone https://github.com/your-org/mcp-operator.git
+git clone https://github.com/FantasyNitroGEN/mcp_operator.git
 cd mcp-operator
 ```
 

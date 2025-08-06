@@ -18,9 +18,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	mcpv1 "github.com/your-org/mcp-operator/api/v1"
-	"github.com/your-org/mcp-operator/internal/controller"
-	"github.com/your-org/mcp-operator/pkg/registry"
+	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
+	"github.com/FantasyNitroGEN/mcp_operator/internal/controller"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
 	//+kubebuilder:scaffold:imports
 )
 

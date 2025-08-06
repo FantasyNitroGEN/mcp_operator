@@ -4,12 +4,12 @@ description: A Helm chart for MCP (Model Context Protocol) Operator
 type: application
 version: 1.0.0
 appVersion: "1.0.0"
-home: https://github.com/your-org/mcp-operator
+home: https://github.com/FantasyNitroGEN/mcp_operator
 sources:
-  - https://github.com/your-org/mcp-operator
+  - https://github.com/FantasyNitroGEN/mcp_operator
 maintainers:
   - name: MCP Operator Team
-    email: mcp-operator@your-org.com
+    email: mcp-operator@fantasynitrogen.com
 keywords:
   - mcp
   - model-context-protocol

@@ -25,10 +25,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	mcpv1 "github.com/your-org/mcp-operator/api/v1"
-	"github.com/your-org/mcp-operator/pkg/metrics"
-	"github.com/your-org/mcp-operator/pkg/registry"
-	"github.com/your-org/mcp-operator/pkg/sync"
+	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/metrics"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/sync"
 )
 
 const (

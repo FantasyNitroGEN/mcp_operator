@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/your-org/mcp-operator/pkg/registry"
-	"github.com/your-org/mcp-operator/pkg/sync"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/sync"
 )
 
 func main() {

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-org/mcp-operator/pkg/circuitbreaker"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/circuitbreaker"
 	"gopkg.in/yaml.v3"
 )
 

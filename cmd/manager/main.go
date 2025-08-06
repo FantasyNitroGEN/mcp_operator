@@ -17,8 +17,10 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	mcpv1 "github.com/your-org/mcp-operator/api/v1"
-	"github.com/your-org/mcp-operator/controllers"
+	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
+	"github.com/FantasyNitroGEN/mcp_operator/controllers"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/sync"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -67,9 +69,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize registry client and syncer
+	registryClient := registry.NewClient()
+	syncer := sync.NewSyncer(registryClient, "/tmp/mcp-servers")
+
 	if err = (&controllers.MCPServerReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		RegistryClient: registryClient,
+		Syncer:         syncer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPServer")
 		os.Exit(1)

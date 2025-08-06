@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/your-org/mcp-operator/pkg/registry"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
 )
 
 // Syncer отвечает за синхронизацию MCP серверов из реестра

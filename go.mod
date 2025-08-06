@@ -1,4 +1,4 @@
-module github.com/your-org/mcp-operator
+module github.com/FantasyNitroGEN/mcp_operator
 
 go 1.24.0
 

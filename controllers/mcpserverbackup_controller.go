@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	mcpv1 "github.com/your-org/mcp-operator/api/v1"
+	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 )
 
 const (
