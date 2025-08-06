@@ -1,0 +1,267 @@
+---
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GO_VERSION: '1.24'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      release_id: ${{ steps.create_release.outputs.id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          configuration: |
+            {
+              "categories": [
+                {
+                  "title": "## 🚀 Features",
+                  "labels": ["feature", "enhancement"]
+                },
+                {
+                  "title": "## 🐛 Bug Fixes",
+                  "labels": ["bug", "fix"]
+                },
+                {
+                  "title": "## 📚 Documentation",
+                  "labels": ["documentation", "docs"]
+                },
+                {
+                  "title": "## 🔧 Maintenance",
+                  "labels": ["maintenance", "chore", "dependencies"]
+                },
+                {
+                  "title": "## 🔒 Security",
+                  "labels": ["security"]
+                }
+              ],
+              "ignore_labels": ["ignore-for-release"],
+              "sort": "ASC",
+              "template": "${{CHANGELOG}}",
+              "pr_template": "- ${{TITLE}} (#${{NUMBER}})"
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## What's Changed
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ## Docker Images
+
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            docker pull ghcr.io/${{ github.repository }}:latest
+            ```
+
+            ## Helm Charts
+
+            ```bash
+            helm install mcp-operator oci://ghcr.io/${{ github.repository_owner }}/charts/mcp-operator --version ${{ github.ref_name }}
+            ```
+
+            ## Installation
+
+            ### Using kubectl
+            ```bash
+            kubectl apply -f https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/install.yaml
+            ```
+
+            ### Using Helm
+            ```bash
+            helm repo add mcp-operator https://github.com/${{ github.repository_owner }}/mcp_k8s/releases
+            helm install mcp-operator mcp-operator/mcp-operator --version ${{ github.ref_name }}
+            ```
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: false
+
+  build-binaries:
+    name: Build Release Binaries
+    runs-on: ubuntu-latest
+    needs: create-release
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Generate manifests
+        run: make manifests generate
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          binary_name="mcp-operator-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            binary_name="${binary_name}.exe"
+          fi
+          CGO_ENABLED=0 go build -a -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o "dist/${binary_name}" cmd/manager/main.go
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+
+  generate-manifests:
+    name: Generate Installation Manifests
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Generate manifests
+        run: make manifests
+
+      - name: Create installation manifest
+        run: |
+          mkdir -p dist
+
+          # Update image tag in kustomization
+          cd config/manager
+          kustomize edit set image controller=ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          cd ../..
+
+          # Generate complete installation manifest
+          make kustomize
+          ./bin/kustomize build config/default > dist/install.yaml
+
+          # Create namespace-scoped installation
+          ./bin/kustomize build config/default | sed 's/ClusterRole/Role/g; s/ClusterRoleBinding/RoleBinding/g' > dist/install-namespaced.yaml
+
+      - name: Upload manifests to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/install.yaml
+            dist/install-namespaced.yaml
+
+  build-and-push-image:
+    name: Build and Push Release Image
+    runs-on: ubuntu-latest
+    needs: create-release
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/s390x,linux/ppc64le
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  update-documentation:
+    name: Update Documentation
+    runs-on: ubuntu-latest
+    needs: [create-release, build-and-push-image]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Update README with latest version
+        run: |
+          # Update version references in README
+          sed -i "s/mcp-operator:v[0-9]\+\.[0-9]\+\.[0-9]\+/mcp-operator:${{ github.ref_name }}/g" README.md
+          sed -i "s/version [0-9]\+\.[0-9]\+\.[0-9]\+/version ${{ github.ref_name }}/g" README.md
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add README.md
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "docs: update version references to ${{ github.ref_name }}"
+            git push
+          fi
