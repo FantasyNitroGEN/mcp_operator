@@ -31,6 +31,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "mcp-operator.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.operator.serviceAccount.automountServiceAccountToken }}
       {{- with .Values.operator.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}

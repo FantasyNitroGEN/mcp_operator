@@ -26,7 +26,7 @@ operator:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
     # Automatically mount service account token
-    automountServiceAccountToken: true
+    automountServiceAccountToken: false
 
   # Pod annotations
   podAnnotations: {}
@@ -34,9 +34,9 @@ operator:
   # Pod security context
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 1001
-    runAsGroup: 1001
-    fsGroup: 1001
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
     seccompProfile:
       type: RuntimeDefault
 
@@ -45,7 +45,7 @@ operator:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     runAsNonRoot: true
-    runAsUser: 1001
+    runAsUser: 10001
     capabilities:
       drop:
       - ALL
