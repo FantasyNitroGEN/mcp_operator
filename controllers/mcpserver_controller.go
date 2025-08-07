@@ -1745,7 +1745,7 @@ func (r *MCPServerReconciler) validateMemoryQuota(ctx context.Context, mcpServer
 	totalUsage.Add(requestedMemory)
 
 	if totalUsage.Cmp(*memoryQuota) > 0 {
-		return fmt.Errorf("Memory quota exceeded: requested %s + current %s = %s > quota %s",
+		return fmt.Errorf("memory quota exceeded: requested %s + current %s = %s > quota %s",
 			requestedMemory.String(), currentUsage.String(), totalUsage.String(), memoryQuota.String())
 	}
 
@@ -1770,7 +1770,7 @@ func (r *MCPServerReconciler) validatePodQuota(ctx context.Context, mcpServer *m
 	totalCount := currentCount + requestedPods
 
 	if totalCount > *podQuota {
-		return fmt.Errorf("Pod quota exceeded: requested %d + current %d = %d > quota %d",
+		return fmt.Errorf("pod quota exceeded: requested %d + current %d = %d > quota %d",
 			requestedPods, currentCount, totalCount, *podQuota)
 	}
 
@@ -1792,7 +1792,7 @@ func (r *MCPServerReconciler) validateServiceQuota(ctx context.Context, mcpServe
 	totalCount := currentCount + requestedServices
 
 	if totalCount > *serviceQuota {
-		return fmt.Errorf("Service quota exceeded: requested %d + current %d = %d > quota %d",
+		return fmt.Errorf("service quota exceeded: requested %d + current %d = %d > quota %d",
 			requestedServices, currentCount, totalCount, *serviceQuota)
 	}
 
@@ -2214,11 +2214,11 @@ func (r *MCPServerReconciler) updateMCPServerStatus(ctx context.Context, mcpServ
 	mcpServer.Status.AvailableReplicas = deployment.Status.AvailableReplicas
 
 	// Determine phase
-	switch readyReplicas := deployment.Status.ReadyReplicas; {
-	case readyReplicas == 0:
+	switch readyReplicas := deployment.Status.ReadyReplicas; readyReplicas {
+	case 0:
 		mcpServer.Status.Phase = "Pending"
 		mcpServer.Status.Message = "Waiting for pods to be ready"
-	case readyReplicas == *deployment.Spec.Replicas:
+	case *deployment.Spec.Replicas:
 		mcpServer.Status.Phase = "Running"
 		mcpServer.Status.Message = "All replicas are ready"
 	default:
