@@ -31,7 +31,12 @@ jobs:
 
       - name: Generate cache key
         id: cache-key
-        run: echo "key=${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}" >> $GITHUB_OUTPUT
+        run: |
+          HASH="${{ hashFiles('**/go.sum') }}"
+          if [ -z "$HASH" ]; then
+            HASH="default"
+          fi
+          echo "key=${{ runner.os }}-go-$HASH" >> $GITHUB_OUTPUT
 
       - name: Cache Go modules and build cache
         uses: actions/cache@v4
@@ -39,7 +44,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ steps.cache-key.outputs.key }}
+          key: ${{ steps.cache-key.outputs.key || format('{0}-go-default', runner.os) }}
           restore-keys: |
             ${{ runner.os }}-go-
 
@@ -67,7 +72,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ needs.setup.outputs.go-cache-key }}
+          key: ${{ needs.setup.outputs.go-cache-key || format('{0}-go-default', runner.os) }}
 
       - name: Generate manifests
         run: make manifests generate
@@ -108,7 +113,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ needs.setup.outputs.go-cache-key }}
+          key: ${{ needs.setup.outputs.go-cache-key || format('{0}-go-default', runner.os) }}
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
@@ -162,7 +167,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ needs.setup.outputs.go-cache-key }}
+          key: ${{ needs.setup.outputs.go-cache-key || format('{0}-go-default', runner.os) }}
 
       - name: Build binary
         run: make build
