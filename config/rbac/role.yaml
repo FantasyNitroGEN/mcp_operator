@@ -63,7 +63,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - mcp.io
+  - mcp.allbeone.io
   resources:
   - mcpserverbackups
   - mcpservers
@@ -76,14 +76,14 @@ rules:
   - update
   - watch
 - apiGroups:
-  - mcp.io
+  - mcp.allbeone.io
   resources:
   - mcpserverbackups/finalizers
   - mcpservers/finalizers
   verbs:
   - update
 - apiGroups:
-  - mcp.io
+  - mcp.allbeone.io
   resources:
   - mcpserverbackups/status
   - mcpservers/status

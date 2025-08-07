@@ -36,10 +36,10 @@ import (
 
 const (
 	// MCPServerBackupFinalizer is the finalizer used for MCPServerBackup resources
-	MCPServerBackupFinalizer = "mcp.io/backup-finalizer"
+	MCPServerBackupFinalizer = "mcp.allbeone.io/backup-finalizer"
 
 	// BackupAnnotationKey is used to mark resources as backup-related
-	BackupAnnotationKey = "mcp.io/backup"
+	BackupAnnotationKey = "mcp.allbeone.io/backup"
 
 	// BackupVersionCurrent is the current version of the backup format
 	BackupVersionCurrent = "v1"
@@ -52,10 +52,10 @@ type MCPServerBackupReconciler struct {
 	Cron   *cron.Cron
 }
 
-//+kubebuilder:rbac:groups=mcp.io,resources=mcpserverbackups,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=mcp.io,resources=mcpserverbackups/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=mcp.io,resources=mcpserverbackups/finalizers,verbs=update
-//+kubebuilder:rbac:groups=mcp.io,resources=mcpservers,verbs=get;list;watch
+//+kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpserverbackups,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpserverbackups/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpserverbackups/finalizers,verbs=update
+//+kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpservers,verbs=get;list;watch
 //+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
@@ -1388,7 +1388,7 @@ func (r *MCPServerBackupReconciler) enforceRetentionPolicy(ctx context.Context, 
 	// List all backups for the same MCPServer
 	backupList := &mcpv1.MCPServerBackupList{}
 	err := r.List(ctx, backupList, client.InNamespace(backup.Namespace), client.MatchingLabels{
-		"mcp.io/mcpserver": backup.Spec.MCPServerRef,
+		"mcp.allbeone.io/mcpserver": backup.Spec.MCPServerRef,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to list backups: %w", err)

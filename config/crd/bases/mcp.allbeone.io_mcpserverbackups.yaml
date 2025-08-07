@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.0
-  name: mcpserverbackups.mcp.io
+  name: mcpserverbackups.mcp.allbeone.io
 spec:
-  group: mcp.io
+  group: mcp.allbeone.io
   names:
     kind: MCPServerBackup
     listKind: MCPServerBackupList

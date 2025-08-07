@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -64,7 +66,7 @@ func main() {
 		},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "mcp-operator.mcp.io",
+		LeaderElectionID:       "mcp-operator.mcp.allbeone.io",
 	}
 
 	// Configure webhook server if webhooks are enabled
@@ -82,7 +84,36 @@ func main() {
 
 	// Initialize registry client and syncer
 	registryClient := registry.NewClient()
-	syncer := sync.NewSyncer(registryClient, "/tmp/mcp-servers")
+	syncer := sync.NewSyncer(registryClient, "servers")
+
+	// Start automatic registry polling in background
+	go func() {
+		setupLog.Info("Starting automatic registry polling")
+
+		// Initial sync on startup
+		ctx := context.Background()
+		if err := syncer.SyncAllServers(ctx); err != nil {
+			setupLog.Error(err, "Failed initial registry sync")
+		} else {
+			setupLog.Info("Initial registry sync completed successfully")
+		}
+
+		// Periodic sync every 30 minutes
+		ticker := time.NewTicker(30 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				setupLog.Info("Starting periodic registry sync")
+				if err := syncer.SyncAllServers(ctx); err != nil {
+					setupLog.Error(err, "Failed periodic registry sync")
+				} else {
+					setupLog.Info("Periodic registry sync completed successfully")
+				}
+			}
+		}
+	}()
 
 	if err = (&controllers.MCPServerReconciler{
 		Client:         mgr.GetClient(),

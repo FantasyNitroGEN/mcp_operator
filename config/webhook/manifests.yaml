@@ -10,12 +10,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-mcp-io-v1-mcpserver
+      path: /mutate-mcp-allbeone-io-v1-mcpserver
   failurePolicy: Fail
   name: mmcpserver.kb.io
   rules:
   - apiGroups:
-    - mcp.io
+    - mcp.allbeone.io
     apiVersions:
     - v1
     operations:
@@ -36,12 +36,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-mcp-io-v1-mcpserver
+      path: /validate-mcp-allbeone-io-v1-mcpserver
   failurePolicy: Fail
   name: vmcpserver.kb.io
   rules:
   - apiGroups:
-    - mcp.io
+    - mcp.allbeone.io
     apiVersions:
     - v1
     operations:

@@ -1,4 +1,4 @@
-{{- if .Values.rbac.create }}
+{{- if .Values.operator.serviceAccount.create }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -12,6 +12,9 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 automountServiceAccountToken: {{ .Values.operator.serviceAccount.automountServiceAccountToken }}
+{{- end }}
+
+{{- if .Values.rbac.create }}
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -23,7 +26,7 @@ metadata:
 rules:
 # MCPServer resources
 - apiGroups:
-  - mcp.io
+  - mcp.allbeone.io
   resources:
   - mcpservers
   verbs:
@@ -35,13 +38,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - mcp.io
+  - mcp.allbeone.io
   resources:
   - mcpservers/finalizers
   verbs:
   - update
 - apiGroups:
-  - mcp.io
+  - mcp.allbeone.io
   resources:
   - mcpservers/status
   verbs:
@@ -50,7 +53,7 @@ rules:
   - update
 # MCPServerBackup resources
 - apiGroups:
-  - mcp.io
+  - mcp.allbeone.io
   resources:
   - mcpserverbackups
   verbs:
@@ -62,13 +65,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - mcp.io
+  - mcp.allbeone.io
   resources:
   - mcpserverbackups/finalizers
   verbs:
   - update
 - apiGroups:
-  - mcp.io
+  - mcp.allbeone.io
   resources:
   - mcpserverbackups/status
   verbs:

@@ -33,7 +33,7 @@ import (
 
 const (
 	// MCPServerFinalizer is the finalizer used for MCPServer resources
-	MCPServerFinalizer = "mcp.io/finalizer"
+	MCPServerFinalizer = "mcp.allbeone.io/finalizer"
 )
 
 // MCPServerReconciler reconciles a MCPServer object
@@ -44,9 +44,9 @@ type MCPServerReconciler struct {
 	Syncer         *sync.Syncer
 }
 
-//+kubebuilder:rbac:groups=mcp.io,resources=mcpservers,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=mcp.io,resources=mcpservers/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=mcp.io,resources=mcpservers/finalizers,verbs=update
+//+kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpservers,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpservers/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpservers/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
@@ -58,7 +58,7 @@ type MCPServerReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	// Create structured logger with correlation ID and context
+	// Create a structured logger with correlation ID and context
 	reconcileID := uuid.New().String()
 	logger := log.FromContext(ctx).WithValues(
 		"mcpserver", req.NamespacedName,
@@ -142,19 +142,58 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: time.Second * 1}, nil
 	}
 
-	// Check for registry loading annotation
+	// Auto-load server from registry if server name is specified but runtime image is empty
+	if mcpServer.Spec.Registry.Name != "" && mcpServer.Spec.Runtime.Image == "" {
+		logger.Info("Auto-loading server from registry",
+			"server_name", mcpServer.Spec.Registry.Name,
+			"phase", "auto_registry_loading",
+		)
+
+		registryStartTime := time.Now()
+		if err := r.loadServerFromRegistry(ctx, mcpServer, mcpServer.Spec.Registry.Name); err != nil {
+			logger.Error(err, "Failed to auto-load server from registry",
+				"server_name", mcpServer.Spec.Registry.Name,
+				"phase", "auto_registry_loading",
+				"duration", time.Since(registryStartTime),
+				"error_type", "registry_load_error",
+			)
+			metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.Name, "error", time.Since(registryStartTime).Seconds())
+			return ctrl.Result{}, err
+		}
+
+		logger.Info("Successfully auto-loaded server from registry",
+			"server_name", mcpServer.Spec.Registry.Name,
+			"phase", "auto_registry_loading",
+			"duration", time.Since(registryStartTime),
+		)
+		metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.Name, "success", time.Since(registryStartTime).Seconds())
+
+		// Update the MCPServer with loaded configuration
+		if err := r.Update(ctx, mcpServer); err != nil {
+			logger.Error(err, "Failed to update MCPServer with loaded configuration",
+				"phase", "auto_registry_loading",
+				"error_type", "update_error",
+			)
+			return ctrl.Result{}, err
+		}
+
+		logger.Info("MCPServer updated with loaded configuration", "phase", "auto_registry_loading")
+		return ctrl.Result{RequeueAfter: time.Second * 2}, nil
+	}
+
+	// Check for registry loading annotation (legacy support)
 	if mcpServer.Annotations != nil {
-		if registryName, exists := mcpServer.Annotations["mcp.io/registry-server"]; exists {
-			logger.Info("Registry loading requested",
+		if registryName, exists := mcpServer.Annotations["mcp.allbeone.io/registry-server"]; exists {
+			logger.Info("Registry loading requested via annotation",
 				"registry_server", registryName,
-				"phase", "registry_loading",
+				"phase", "annotation_registry_loading",
 			)
 
 			registryStartTime := time.Now()
 			if err := r.loadServerFromRegistry(ctx, mcpServer, registryName); err != nil {
-				logger.Error(err, "Failed to load server from registry",
+				logger.Error(err, "Failed to load server from registry via annotation",
 					"registry_server", registryName,
-					"phase", "registry_loading",
+					"phase", "annotation_registry_loading",
 					"duration", time.Since(registryStartTime),
 					"error_type", "registry_load_error",
 				)
@@ -162,9 +201,9 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				return ctrl.Result{}, err
 			}
 
-			logger.Info("Successfully loaded server from registry",
+			logger.Info("Successfully loaded server from registry via annotation",
 				"registry_server", registryName,
-				"phase", "registry_loading",
+				"phase", "annotation_registry_loading",
 				"duration", time.Since(registryStartTime),
 			)
 			metrics.RecordRegistryOperation(mcpServer.Namespace, registryName, "success", time.Since(registryStartTime).Seconds())
@@ -1498,7 +1537,7 @@ func (r *MCPServerReconciler) buildNodeSelector(mcpServer *mcpv1.MCPServer) map[
 		// Add tenant ID as node selector for strict isolation
 		if mcpServer.Spec.Tenancy.IsolationLevel == mcpv1.IsolationLevelNode ||
 			mcpServer.Spec.Tenancy.IsolationLevel == mcpv1.IsolationLevelStrict {
-			nodeSelector["mcp.io/tenant"] = mcpServer.Spec.Tenancy.TenantID
+			nodeSelector["mcp.allbeone.io/tenant"] = mcpServer.Spec.Tenancy.TenantID
 		}
 
 		// Add tenant labels as node selectors
@@ -1527,7 +1566,7 @@ func (r *MCPServerReconciler) buildTolerations(mcpServer *mcpv1.MCPServer) []cor
 		if mcpServer.Spec.Tenancy.IsolationLevel == mcpv1.IsolationLevelNode ||
 			mcpServer.Spec.Tenancy.IsolationLevel == mcpv1.IsolationLevelStrict {
 			tolerations = append(tolerations, corev1.Toleration{
-				Key:      "mcp.io/tenant",
+				Key:      "mcp.allbeone.io/tenant",
 				Operator: corev1.TolerationOpEqual,
 				Value:    mcpServer.Spec.Tenancy.TenantID,
 				Effect:   corev1.TaintEffectNoSchedule,
@@ -1536,7 +1575,7 @@ func (r *MCPServerReconciler) buildTolerations(mcpServer *mcpv1.MCPServer) []cor
 
 		// Add general tenant toleration
 		tolerations = append(tolerations, corev1.Toleration{
-			Key:      "mcp.io/tenant-workload",
+			Key:      "mcp.allbeone.io/tenant-workload",
 			Operator: corev1.TolerationOpEqual,
 			Value:    "true",
 			Effect:   corev1.TaintEffectNoSchedule,
@@ -1572,7 +1611,7 @@ func (r *MCPServerReconciler) buildAffinity(mcpServer *mcpv1.MCPServer) *corev1.
 			PodAffinityTerm: corev1.PodAffinityTerm{
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"mcp.io/tenant": mcpServer.Spec.Tenancy.TenantID,
+						"mcp.allbeone.io/tenant": mcpServer.Spec.Tenancy.TenantID,
 					},
 				},
 				TopologyKey: "kubernetes.io/hostname",
@@ -1589,7 +1628,7 @@ func (r *MCPServerReconciler) buildAffinity(mcpServer *mcpv1.MCPServer) *corev1.
 					LabelSelector: &metav1.LabelSelector{
 						MatchExpressions: []metav1.LabelSelectorRequirement{
 							{
-								Key:      "mcp.io/tenant",
+								Key:      "mcp.allbeone.io/tenant",
 								Operator: metav1.LabelSelectorOpNotIn,
 								Values:   []string{mcpServer.Spec.Tenancy.TenantID},
 							},
@@ -1622,13 +1661,13 @@ func (r *MCPServerReconciler) labelsForMCPServerWithTenancy(mcpServer *mcpv1.MCP
 
 	// Add tenant-specific labels if tenancy is configured
 	if mcpServer.Spec.Tenancy != nil {
-		labels["mcp.io/tenant"] = mcpServer.Spec.Tenancy.TenantID
-		labels["mcp.io/isolation-level"] = string(mcpServer.Spec.Tenancy.IsolationLevel)
+		labels["mcp.allbeone.io/tenant"] = mcpServer.Spec.Tenancy.TenantID
+		labels["mcp.allbeone.io/isolation-level"] = string(mcpServer.Spec.Tenancy.IsolationLevel)
 
 		// Add custom tenant labels
 		for k, v := range mcpServer.Spec.Tenancy.Labels {
 			// Avoid overriding system labels
-			if !strings.HasPrefix(k, "app.kubernetes.io/") && !strings.HasPrefix(k, "mcp.io/") {
+			if !strings.HasPrefix(k, "app.kubernetes.io/") && !strings.HasPrefix(k, "mcp.allbeone.io/") {
 				labels[k] = v
 			}
 		}
@@ -1805,7 +1844,7 @@ func (r *MCPServerReconciler) getTenantCPUUsage(ctx context.Context, tenantID, n
 	// List all MCPServers for this tenant
 	mcpServerList := &mcpv1.MCPServerList{}
 	err := r.List(ctx, mcpServerList, client.InNamespace(namespace), client.MatchingLabels{
-		"mcp.io/tenant": tenantID,
+		"mcp.allbeone.io/tenant": tenantID,
 	})
 	if err != nil {
 		return resource.Quantity{}, err
@@ -1835,7 +1874,7 @@ func (r *MCPServerReconciler) getTenantMemoryUsage(ctx context.Context, tenantID
 	// List all MCPServers for this tenant
 	mcpServerList := &mcpv1.MCPServerList{}
 	err := r.List(ctx, mcpServerList, client.InNamespace(namespace), client.MatchingLabels{
-		"mcp.io/tenant": tenantID,
+		"mcp.allbeone.io/tenant": tenantID,
 	})
 	if err != nil {
 		return resource.Quantity{}, err
@@ -1865,7 +1904,7 @@ func (r *MCPServerReconciler) getTenantPodCount(ctx context.Context, tenantID, n
 	// List all MCPServers for this tenant
 	mcpServerList := &mcpv1.MCPServerList{}
 	err := r.List(ctx, mcpServerList, client.InNamespace(namespace), client.MatchingLabels{
-		"mcp.io/tenant": tenantID,
+		"mcp.allbeone.io/tenant": tenantID,
 	})
 	if err != nil {
 		return 0, err
@@ -1888,7 +1927,7 @@ func (r *MCPServerReconciler) getTenantServiceCount(ctx context.Context, tenantI
 	// List all Services for this tenant
 	serviceList := &corev1.ServiceList{}
 	err := r.List(ctx, serviceList, client.InNamespace(namespace), client.MatchingLabels{
-		"mcp.io/tenant": tenantID,
+		"mcp.allbeone.io/tenant": tenantID,
 	})
 	if err != nil {
 		return 0, err
@@ -1947,7 +1986,7 @@ func (r *MCPServerReconciler) networkPolicyForMCPServer(mcpServer *mcpv1.MCPServ
 	// Create pod selector for this tenant
 	podSelector := metav1.LabelSelector{
 		MatchLabels: map[string]string{
-			"mcp.io/tenant": mcpServer.Spec.Tenancy.TenantID,
+			"mcp.allbeone.io/tenant": mcpServer.Spec.Tenancy.TenantID,
 		},
 	}
 
@@ -2092,7 +2131,7 @@ func (r *MCPServerReconciler) buildDefaultIngressRules(mcpServer *mcpv1.MCPServe
 			{
 				PodSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"mcp.io/tenant": mcpServer.Spec.Tenancy.TenantID,
+						"mcp.allbeone.io/tenant": mcpServer.Spec.Tenancy.TenantID,
 					},
 				},
 			},
@@ -2143,7 +2182,7 @@ func (r *MCPServerReconciler) buildDefaultEgressRules(mcpServer *mcpv1.MCPServer
 			{
 				PodSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						"mcp.io/tenant": mcpServer.Spec.Tenancy.TenantID,
+						"mcp.allbeone.io/tenant": mcpServer.Spec.Tenancy.TenantID,
 					},
 				},
 			},

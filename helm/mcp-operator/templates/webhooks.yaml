@@ -16,13 +16,13 @@ webhooks:
     service:
       name: {{ include "mcp-operator.webhookServiceName" . }}
       namespace: {{ include "mcp-operator.namespace" . }}
-      path: /validate-mcp-io-v1-mcpserver
+      path: /validate-mcp-allbeone-io-v1-mcpserver
     {{- if not .Values.webhook.certManager.enabled }}
     caBundle: {{ include "mcp-operator.webhookCABundle" . }}
     {{- end }}
   rules:
   - operations: ["CREATE", "UPDATE"]
-    apiGroups: ["mcp.io"]
+    apiGroups: ["mcp.allbeone.io"]
     apiVersions: ["v1"]
     resources: ["mcpservers"]
   admissionReviewVersions: {{ include "mcp-operator.webhookAdmissionReviewVersions" . }}
@@ -47,13 +47,13 @@ webhooks:
     service:
       name: {{ include "mcp-operator.webhookServiceName" . }}
       namespace: {{ include "mcp-operator.namespace" . }}
-      path: /mutate-mcp-io-v1-mcpserver
+      path: /mutate-mcp-allbeone-io-v1-mcpserver
     {{- if not .Values.webhook.certManager.enabled }}
     caBundle: {{ include "mcp-operator.webhookCABundle" . }}
     {{- end }}
   rules:
   - operations: ["CREATE", "UPDATE"]
-    apiGroups: ["mcp.io"]
+    apiGroups: ["mcp.allbeone.io"]
     apiVersions: ["v1"]
     resources: ["mcpservers"]
   admissionReviewVersions: {{ include "mcp-operator.webhookAdmissionReviewVersions" . }}

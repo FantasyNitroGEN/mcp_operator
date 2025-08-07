@@ -42,6 +42,17 @@ MCP (Model Context Protocol) Operator - это Kubernetes-оператор, ко
 - ✅ **Группировка обновлений** по типам зависимостей
 - ✅ **Автоматические уведомления** о уязвимостях безопасности
 
+### Webhook и автоматические значения по умолчанию
+- ✅ **Мутирующий webhook** автоматически применяет разумные значения по умолчанию
+- ✅ **Валидирующий webhook** проверяет корректность конфигурации
+- ✅ **Автоматические значения по умолчанию**:
+  - `port`: 8080 (если не указан)
+  - `replicas`: 1 (если не указано)
+  - `serviceType`: ClusterIP (если не указан)
+  - `resources.requests`: cpu: 100m, memory: 128Mi (если не указаны)
+  - `resources.limits`: cpu: 500m, memory: 512Mi (если не указаны)
+  - `securityContext`: runAsNonRoot: true, runAsUser: 1000 (если не указан)
+
 ## Быстрый старт
 
 ### Предварительные требования
@@ -54,6 +65,26 @@ MCP (Model Context Protocol) Operator - это Kubernetes-оператор, ко
 ### Установка
 
 #### Установка через Helm (Рекомендуется)
+
+##### Метод 1: Из Helm репозитория (Рекомендуется)
+
+1. Добавьте Helm репозиторий:
+```bash
+helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_k8s/
+helm repo update
+```
+
+2. Установите оператор:
+```bash
+helm install mcp-operator mcp-operator/mcp-operator
+```
+
+3. Проверьте статус установки:
+```bash
+kubectl get pods -l app.kubernetes.io/name=mcp-operator
+```
+
+##### Метод 2: Из исходного кода
 
 1. Склонируйте репозиторий:
 ```bash
@@ -88,7 +119,7 @@ make run
 Создайте файл с описанием MCP сервера:
 
 ```yaml
-apiVersion: mcp.io/v1
+apiVersion: mcp.allbeone.io/v1
 kind: MCPServer
 metadata:
   name: filesystem-server
@@ -182,7 +213,7 @@ spec:
 
 ### Файловый сервер
 ```yaml
-apiVersion: mcp.io/v1
+apiVersion: mcp.allbeone.io/v1
 kind: MCPServer
 metadata:
   name: filesystem-server
@@ -198,7 +229,7 @@ spec:
 
 ### Git сервер
 ```yaml
-apiVersion: mcp.io/v1
+apiVersion: mcp.allbeone.io/v1
 kind: MCPServer
 metadata:
   name: git-server
@@ -213,7 +244,7 @@ spec:
 
 ### PostgreSQL сервер
 ```yaml
-apiVersion: mcp.io/v1
+apiVersion: mcp.allbeone.io/v1
 kind: MCPServer
 metadata:
   name: postgres-server
@@ -262,7 +293,7 @@ make deploy IMG=your-registry/mcp-operator:tag
 
 - **CRD (Custom Resource Definition)**: Определяет схему ресурса `MCPServer`
 - **Контроллер**: Отслеживает изменения в ресурсах `MCPServer` и создает соответствующие Kubernetes объекты
-- **Webhook**: Валидация и мутация ресурсов (планируется)
+- **Webhook**: Валидация и мутация ресурсов с автоматическим применением значений по умолчанию
 
 ### Создаваемые ресурсы
 
@@ -285,9 +316,9 @@ MIT License - см. [LICENSE](LICENSE) файл.
 
 ## Roadmap
 
-- [ ] Поддержка Helm charts
-- [ ] Webhook для валидации
-- [ ] Metrics и мониторинг
+- [x] Поддержка Helm charts
+- [x] Webhook для валидации и мутации
+- [x] Metrics и мониторинг
 - [ ] Auto-scaling на основе нагрузки
 - [ ] Интеграция с Service Mesh (Istio)
 - [ ] Поддержка секретов и ConfigMaps

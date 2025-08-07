@@ -43,7 +43,7 @@ type MCPServerDefaulter struct {
 	client.Client
 }
 
-// +kubebuilder:webhook:path=/validate-mcp-io-v1-mcpserver,mutating=false,failurePolicy=fail,sideEffects=None,groups=mcp.io,resources=mcpservers,verbs=create;update,versions=v1,name=vmcpserver.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-mcp-allbeone-io-v1-mcpserver,mutating=false,failurePolicy=fail,sideEffects=None,groups=mcp.allbeone.io,resources=mcpservers,verbs=create;update,versions=v1,name=vmcpserver.kb.io,admissionReviewVersions=v1
 
 func (v *MCPServerValidator) Handle(ctx context.Context, req admission.Request) admission.Response {
 	mcpServer := &mcpv1.MCPServer{}
@@ -60,7 +60,7 @@ func (v *MCPServerValidator) Handle(ctx context.Context, req admission.Request) 
 	return admission.Allowed("")
 }
 
-// +kubebuilder:webhook:path=/mutate-mcp-io-v1-mcpserver,mutating=true,failurePolicy=fail,sideEffects=None,groups=mcp.io,resources=mcpservers,verbs=create;update,versions=v1,name=mmcpserver.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-mcp-allbeone-io-v1-mcpserver,mutating=true,failurePolicy=fail,sideEffects=None,groups=mcp.allbeone.io,resources=mcpservers,verbs=create;update,versions=v1,name=mmcpserver.kb.io,admissionReviewVersions=v1
 
 func (d *MCPServerDefaulter) Handle(ctx context.Context, req admission.Request) admission.Response {
 	mcpServer := &mcpv1.MCPServer{}
@@ -313,17 +313,14 @@ func (d *MCPServerDefaulter) setDefaults(mcpServer *mcpv1.MCPServer) {
 
 	// Set default resource requests if not specified
 	if mcpServer.Spec.Resources.Requests == nil {
-		if mcpServer.Spec.Resources.Requests == nil {
-			mcpServer.Spec.Resources.Requests = make(mcpv1.ResourceList)
-		}
+		mcpServer.Spec.Resources.Requests = make(mcpv1.ResourceList)
 		mcpServer.Spec.Resources.Requests["cpu"] = "100m"
 		mcpServer.Spec.Resources.Requests["memory"] = "128Mi"
 	}
 
+	// Set default resource limits if not specified
 	if mcpServer.Spec.Resources.Limits == nil {
-		if mcpServer.Spec.Resources.Limits == nil {
-			mcpServer.Spec.Resources.Limits = make(mcpv1.ResourceList)
-		}
+		mcpServer.Spec.Resources.Limits = make(mcpv1.ResourceList)
 		mcpServer.Spec.Resources.Limits["cpu"] = "500m"
 		mcpServer.Spec.Resources.Limits["memory"] = "512Mi"
 	}
@@ -343,8 +340,8 @@ func SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Client: mgr.GetClient(),
 	}
 
-	mgr.GetWebhookServer().Register("/validate-mcp-io-v1-mcpserver", &webhook.Admission{Handler: validator})
-	mgr.GetWebhookServer().Register("/mutate-mcp-io-v1-mcpserver", &webhook.Admission{Handler: defaulter})
+	mgr.GetWebhookServer().Register("/validate-mcp-allbeone-io-v1-mcpserver", &webhook.Admission{Handler: validator})
+	mgr.GetWebhookServer().Register("/mutate-mcp-allbeone-io-v1-mcpserver", &webhook.Admission{Handler: defaulter})
 
 	return nil
 }
