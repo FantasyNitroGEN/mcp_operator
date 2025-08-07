@@ -54,7 +54,7 @@
       "description": "Separate major updates",
       "matchUpdateTypes": ["major"],
       "groupName": "Major updates",
-      "schedule": ["before 6am on first day of month"],
+      "schedule": ["before 6am on the 1st day of the month"],
       "automerge": false
     }
   ],
