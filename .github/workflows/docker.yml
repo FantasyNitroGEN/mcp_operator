@@ -22,6 +22,14 @@ jobs:
       security-events: write
 
     steps:
+      - name: Clean up workspace
+        run: |
+          # Fix permissions for any read-only files that might prevent cleanup
+          if [ -d "${{ github.workspace }}" ]; then
+            find "${{ github.workspace }}" -type f -perm -u-w -exec chmod u+w {} \; 2>/dev/null || true
+          fi
+        continue-on-error: true
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -99,6 +107,14 @@ jobs:
       packages: write
 
     steps:
+      - name: Clean up workspace
+        run: |
+          # Fix permissions for any read-only files that might prevent cleanup
+          if [ -d "${{ github.workspace }}" ]; then
+            find "${{ github.workspace }}" -type f -perm -u-w -exec chmod u+w {} \; 2>/dev/null || true
+          fi
+        continue-on-error: true
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
