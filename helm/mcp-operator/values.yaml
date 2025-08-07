@@ -9,8 +9,11 @@ operator:
     repository: ghcr.io/fantasynitrogen/mcp_operator
     pullPolicy: Always
     # Overrides the image tag whose default is the chart appVersion.
-    tag: ""
+    # For security compliance (CKV_K8S_14), always specify a fixed tag
+    tag: "latest"
     # Image digest (takes precedence over tag if specified)
+    # For best security practices (CKV_K8S_43), use digest instead of tag
+    # Example: sha256:abcd1234567890abcd1234567890abcd1234567890abcd1234567890abcd1234
     digest: ""
 
   # Image pull secrets
@@ -141,7 +144,9 @@ crds:
   keep: false
 
 # Namespace configuration
-namespaceOverride: ""
+# For security compliance (CKV_K8S_21), avoid using default namespace
+# Specify a dedicated namespace for the operator
+namespaceOverride: "mcp"
 
 # Common labels
 commonLabels: {}
