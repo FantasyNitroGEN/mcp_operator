@@ -70,7 +70,7 @@ MCP (Model Context Protocol) Operator - это Kubernetes-оператор, ко
 
 1. Добавьте Helm репозиторий:
 ```bash
-helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_k8s/
+helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
 helm repo update
 ```
 

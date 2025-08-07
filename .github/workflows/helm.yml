@@ -352,6 +352,12 @@ jobs:
               helm package "$chart" --destination ./gh-pages-charts/
             fi
           done
+          
+          # Copy index.html for GitHub Pages landing page
+          if [ -f "helm-pages-index.html" ]; then
+            cp helm-pages-index.html ./gh-pages-charts/index.html
+            echo "Copied index.html for GitHub Pages landing page"
+          fi
 
       - name: Create Helm repository index
         run: |
