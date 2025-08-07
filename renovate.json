@@ -9,58 +9,99 @@
     ":automergeMinor"
   ],
   "timezone": "UTC",
-  "schedule": ["before 6am on monday"],
-  "labels": ["dependencies"],
-  "assignees": ["@FantasyNitroGEN"],
-  "reviewers": ["@FantasyNitroGEN"],
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "assignees": [
+    "@FantasyNitroGEN"
+  ],
+  "reviewers": [
+    "@FantasyNitroGEN"
+  ],
   "packageRules": [
     {
       "description": "Group Go dependencies",
-      "matchManagers": ["gomod"],
+      "matchManagers": [
+        "gomod"
+      ],
       "groupName": "Go dependencies",
-      "schedule": ["before 6am on monday"]
+      "schedule": [
+        "before 6am on monday"
+      ]
     },
     {
       "description": "Group Kubernetes dependencies",
-      "matchManagers": ["gomod"],
-      "matchPackagePatterns": ["^k8s.io/", "^sigs.k8s.io/"],
+      "matchManagers": [
+        "gomod"
+      ],
       "groupName": "Kubernetes dependencies",
-      "schedule": ["before 6am on monday"]
+      "schedule": [
+        "before 6am on monday"
+      ],
+      "matchPackageNames": [
+        "/^k8s.io//",
+        "/^sigs.k8s.io//"
+      ]
     },
     {
       "description": "Group GitHub Actions",
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "GitHub Actions",
-      "schedule": ["before 6am on monday"]
+      "schedule": [
+        "before 6am on monday"
+      ]
     },
     {
       "description": "Group Docker images",
-      "matchManagers": ["dockerfile"],
+      "matchManagers": [
+        "dockerfile"
+      ],
       "groupName": "Docker images",
-      "schedule": ["before 6am on monday"]
+      "schedule": [
+        "before 6am on monday"
+      ]
     },
     {
       "description": "Auto-merge patch updates for stable dependencies",
-      "matchUpdateTypes": ["patch"],
-      "matchPackagePatterns": ["^github.com/", "^golang.org/x/", "^gopkg.in/"],
-      "automerge": true
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "automerge": true,
+      "matchPackageNames": [
+        "/^github.com//",
+        "/^golang.org/x//",
+        "/^gopkg.in//"
+      ]
     },
     {
       "description": "Pin GitHub Actions to digest",
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "pinDigests": true
     },
     {
       "description": "Separate major updates",
-      "matchUpdateTypes": ["major"],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "groupName": "Major updates",
-      "schedule": ["before 6am on the 1st day of the month"],
+      "schedule": [
+        "before 6am on the 1st day of the month"
+      ],
       "automerge": false
     }
   ],
   "vulnerabilityAlerts": {
     "enabled": true,
-    "schedule": ["at any time"]
+    "schedule": [
+      "at any time"
+    ]
   },
   "osvVulnerabilityAlerts": true,
   "prConcurrentLimit": 5,
