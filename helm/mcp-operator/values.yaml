@@ -127,6 +127,12 @@ webhook:
       name: selfsigned-issuer
       kind: ClusterIssuer
 
+# Backup configuration
+backup:
+  # Enable backup functionality
+  # When disabled, secrets access permissions are not granted for security compliance
+  enabled: false
+
 # RBAC configuration
 rbac:
   # Create RBAC resources

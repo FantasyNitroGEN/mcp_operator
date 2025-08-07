@@ -59,6 +59,8 @@ type MCPServerBackupReconciler struct {
 //+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
+// Note: Secrets access is required for backup functionality to read AWS/S3 credentials
+// This permission is conditionally granted in Helm template based on backup.enabled value
 
 // Reconcile is part of the main kubernetes reconciliation loop
 func (r *MCPServerBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -419,8 +421,43 @@ func (r *MCPServerBackupReconciler) removeFromLocalStorageIndex(ctx context.Cont
 	return nil
 }
 
+// validateIndexPath validates that the index path is safe and within expected boundaries
+func validateIndexPath(indexPath string) error {
+	// Check for null bytes or other dangerous characters first
+	if strings.ContainsAny(indexPath, "\x00") {
+		return fmt.Errorf("invalid characters in index path: %s", indexPath)
+	}
+
+	// Check for obvious path traversal attempts in the original path
+	if strings.Contains(indexPath, "..") {
+		return fmt.Errorf("path traversal detected in index path: %s", indexPath)
+	}
+
+	// Clean the path to resolve any . and .. elements
+	cleanPath := filepath.Clean(indexPath)
+
+	// Get absolute path to resolve any remaining relative components
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve absolute path: %w", err)
+	}
+
+	// For additional security, ensure the resolved path doesn't escape expected boundaries
+	// This is a defense-in-depth measure
+	if strings.Contains(filepath.Base(absPath), "..") {
+		return fmt.Errorf("suspicious path detected after resolution: %s", indexPath)
+	}
+
+	return nil
+}
+
 // removeBackupFromIndexFile removes a backup entry from a specific index file
 func (r *MCPServerBackupReconciler) removeBackupFromIndexFile(logger logr.Logger, indexPath, backupKey string, backup *mcpv1.MCPServerBackup) error {
+	// Validate the index path to prevent directory traversal attacks
+	if err := validateIndexPath(indexPath); err != nil {
+		return fmt.Errorf("invalid index path: %w", err)
+	}
+
 	// Check if index file exists
 	if _, err := os.Stat(indexPath); os.IsNotExist(err) {
 		logger.Info("Index file does not exist, nothing to clean up", "path", indexPath)

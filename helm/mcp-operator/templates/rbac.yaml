@@ -80,18 +80,27 @@ rules:
   - ""
   resources:
   - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+{{- if .Values.backup.enabled }}
+# Secrets access only when backup functionality is enabled
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - get
   - list
   - watch
+{{- end }}
 - apiGroups:
   - ""
   resources:
   - services
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
@@ -142,11 +151,8 @@ rules:
   - networkpolicies
   verbs:
   - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 # Batch resources for backups
 - apiGroups:
