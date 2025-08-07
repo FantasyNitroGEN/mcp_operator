@@ -71,7 +71,7 @@ jobs:
 
   security-scan:
     name: Security Scan Helm Charts
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -91,9 +91,11 @@ jobs:
 
       - name: Upload Checkov scan results
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('checkov-helm.sarif') != ''
         with:
           sarif_file: checkov-helm.sarif
+          category: checkov-helm
+        continue-on-error: true
 
       - name: Run Trivy on Helm charts
         uses: aquasecurity/trivy-action@master
@@ -105,9 +107,11 @@ jobs:
 
       - name: Upload Trivy scan results
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && hashFiles('trivy-helm.sarif') != ''
         with:
           sarif_file: 'trivy-helm.sarif'
+          category: trivy-helm
+        continue-on-error: true
 
   package-and-publish:
     name: Package and Publish Helm Charts

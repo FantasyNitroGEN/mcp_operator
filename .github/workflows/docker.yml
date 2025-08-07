@@ -75,6 +75,8 @@ jobs:
         if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: 'trivy-results.sarif'
+          category: trivy-docker
+        continue-on-error: true
 
       - name: Push Docker image
         if: github.event_name != 'pull_request'
