@@ -6,7 +6,7 @@
 operator:
   # Image configuration
   image:
-    repository: mcp-operator
+    repository: ghcr.io/fantasynitrogen/mcp_operator
     pullPolicy: Always
     # Overrides the image tag whose default is the chart appVersion.
     tag: ""
@@ -138,7 +138,7 @@ crds:
   install: true
   
   # Keep CRDs on uninstall
-  keep: true
+  keep: false
 
 # Namespace configuration
 namespaceOverride: ""

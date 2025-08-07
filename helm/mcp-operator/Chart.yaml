@@ -3,7 +3,7 @@ name: mcp-operator
 description: A Helm chart for MCP (Model Context Protocol) Operator
 type: application
 version: 1.0.0
-appVersion: "1.0.0"
+appVersion: "latest"
 home: https://github.com/FantasyNitroGEN/mcp_operator
 sources:
   - https://github.com/FantasyNitroGEN/mcp_operator
