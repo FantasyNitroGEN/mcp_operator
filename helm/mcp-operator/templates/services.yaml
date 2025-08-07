@@ -23,7 +23,7 @@ spec:
     {{- include "mcp-operator.selectorLabels" . | nindent 4 }}
 {{- end }}
 
-{{- if .Values.webhook.enabled }}
+{{- if eq (include "mcp-operator.webhooksEnabled" .) "true" }}
 ---
 apiVersion: v1
 kind: Service

@@ -182,10 +182,40 @@ Create NetworkPolicy name
 {{- end }}
 
 {{/*
+Check if cert-manager is available
+*/}}
+{{- define "mcp-operator.certManagerAvailable" -}}
+{{- $certManagerAvailable := false -}}
+{{- if .Capabilities.APIVersions.Has "cert-manager.io/v1" -}}
+{{- $certManagerAvailable = true -}}
+{{- end -}}
+{{- $certManagerAvailable -}}
+{{- end }}
+
+{{/*
+Determine if webhooks should be enabled
+*/}}
+{{- define "mcp-operator.webhooksEnabled" -}}
+{{- $webhooksEnabled := false -}}
+{{- if .Values.webhook.enabled -}}
+{{- if .Values.webhook.autoDetectCertManager -}}
+{{- $certManagerAvailable := include "mcp-operator.certManagerAvailable" . -}}
+{{- if eq $certManagerAvailable "true" -}}
+{{- $webhooksEnabled = true -}}
+{{- end -}}
+{{- else -}}
+{{- $webhooksEnabled = true -}}
+{{- end -}}
+{{- end -}}
+{{- $webhooksEnabled -}}
+{{- end }}
+
+{{/*
 Validate required values
 */}}
 {{- define "mcp-operator.validateValues" -}}
-{{- if and .Values.webhook.enabled (not .Values.webhook.certManager.enabled) (not .Values.webhook.caBundle) }}
+{{- $webhooksEnabled := include "mcp-operator.webhooksEnabled" . -}}
+{{- if and (eq $webhooksEnabled "true") (not .Values.webhook.certManager.enabled) (not .Values.webhook.caBundle) }}
 {{- fail "webhook.caBundle is required when webhook is enabled and cert-manager is disabled" }}
 {{- end }}
 {{- if and .Values.metrics.serviceMonitor.enabled (not .Values.metrics.enabled) }}

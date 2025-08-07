@@ -29,7 +29,7 @@ operator:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
     # Automatically mount service account token
-    automountServiceAccountToken: false
+    automountServiceAccountToken: true
 
   # Pod annotations
   podAnnotations: {}
@@ -115,6 +115,9 @@ webhook:
   # Enable admission webhooks
   enabled: true
   
+  # Auto-detect cert-manager and disable webhooks if not found
+  autoDetectCertManager: true
+
   # Webhook service configuration
   service:
     type: ClusterIP
@@ -122,10 +125,25 @@ webhook:
 
   # Certificate configuration
   certManager:
-    enabled: false
+    enabled: true
     issuerRef:
       name: selfsigned-issuer
-      kind: ClusterIssuer
+      kind: Issuer
+
+  # CA bundle for webhook certificates (required when certManager is disabled)
+  caBundle: ""
+
+  # Webhook failure policy
+  failurePolicy: "Fail"
+
+  # Admission review versions
+  admissionReviewVersions: ["v1", "v1beta1"]
+
+  # Side effects
+  sideEffects: "None"
+
+  # Timeout in seconds
+  timeoutSeconds: 10
 
 # Backup configuration
 backup:

@@ -57,7 +57,8 @@ spec:
             - --leader-elect
             - --metrics-bind-address=0.0.0.0:8080
             - --health-probe-bind-address=0.0.0.0:8081
-            {{- if .Values.webhook.enabled }}
+            {{- if eq (include "mcp-operator.webhooksEnabled" .) "true" }}
+            - --enable-webhooks
             - --webhook-port=9443
             {{- end }}
           {{- with .Values.operator.securityContext }}
@@ -71,7 +72,7 @@ spec:
             - name: health
               containerPort: 8081
               protocol: TCP
-            {{- if .Values.webhook.enabled }}
+            {{- if eq (include "mcp-operator.webhooksEnabled" .) "true" }}
             - name: webhook
               containerPort: 9443
               protocol: TCP
@@ -101,7 +102,7 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
-            {{- if .Values.webhook.enabled }}
+            {{- if eq (include "mcp-operator.webhooksEnabled" .) "true" }}
             - name: webhook-certs
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
@@ -113,7 +114,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       volumes:
-        {{- if .Values.webhook.enabled }}
+        {{- if eq (include "mcp-operator.webhooksEnabled" .) "true" }}
         - name: webhook-certs
           secret:
             secretName: {{ include "mcp-operator.fullname" . }}-webhook-certs
