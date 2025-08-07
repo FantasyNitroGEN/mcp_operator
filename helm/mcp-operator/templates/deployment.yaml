@@ -44,7 +44,11 @@ spec:
       {{- end }}
       containers:
         - name: manager
+          {{- if .Values.operator.image.digest }}
+          image: "{{ .Values.operator.image.repository }}@{{ .Values.operator.image.digest }}"
+          {{- else }}
           image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag | default .Chart.AppVersion }}"
+          {{- end }}
           imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
           command:
             - /manager

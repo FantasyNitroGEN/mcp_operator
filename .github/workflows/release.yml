@@ -14,7 +14,7 @@ env:
 jobs:
   create-release:
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: write
       packages: write
@@ -104,7 +104,7 @@ jobs:
 
   build-binaries:
     name: Build Release Binaries
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: create-release
     strategy:
       matrix:
@@ -154,7 +154,7 @@ jobs:
 
   generate-manifests:
     name: Generate Installation Manifests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: create-release
     steps:
       - name: Checkout
@@ -193,7 +193,7 @@ jobs:
 
   build-and-push-image:
     name: Build and Push Release Image
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: create-release
     permissions:
       contents: read
@@ -236,7 +236,7 @@ jobs:
 
   update-documentation:
     name: Update Documentation
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [create-release, build-and-push-image]
     permissions:
       contents: write

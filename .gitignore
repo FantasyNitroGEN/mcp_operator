@@ -63,3 +63,4 @@ charts/
 cover.out
 coverage.txt
 coverage.html
+/actions-runner/

@@ -25,7 +25,7 @@ env:
 jobs:
   lint-and-test:
     name: Lint and Test Helm Charts
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,9 +51,9 @@ jobs:
           helm repo add bitnami https://charts.bitnami.com/bitnami
           helm repo update
 
-      - name: Run chart-testing (list)
+      - name: Run chart-testing (list-changed)
         id: list
-        run: ct list --target-branch ${{ github.event.repository.default_branch }}
+        run: ct list-changed --target-branch ${{ github.event.repository.default_branch }}
 
       - name: Run chart-testing (lint)
         if: steps.list.outputs.changed == 'true'
@@ -71,7 +71,7 @@ jobs:
 
   security-scan:
     name: Security Scan Helm Charts
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -111,7 +111,7 @@ jobs:
 
   package-and-publish:
     name: Package and Publish Helm Charts
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [lint-and-test, security-scan]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -160,7 +160,7 @@ jobs:
 
   release-charts:
     name: Release Helm Charts
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: github.event_name == 'release'
     permissions:
       contents: write

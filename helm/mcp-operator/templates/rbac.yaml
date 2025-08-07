@@ -11,7 +11,7 @@ metadata:
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-automountServiceAccountToken: true
+automountServiceAccountToken: {{ .Values.operator.serviceAccount.automountServiceAccountToken }}
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
