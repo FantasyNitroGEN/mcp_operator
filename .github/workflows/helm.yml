@@ -196,6 +196,12 @@ jobs:
       - name: Log in to GitHub Container Registry
         run: |
           echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+          if [ $? -eq 0 ]; then
+            echo "Successfully logged in to ghcr.io"
+          else
+            echo "Failed to log in to ghcr.io"
+            exit 1
+          fi
 
       - name: Package Helm charts
         run: |
@@ -211,10 +217,19 @@ jobs:
 
       - name: Push Helm charts to OCI registry
         run: |
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "Repository owner (lowercase): $REPO_OWNER"
+
           for package in packaged-charts/*.tgz; do
             if [ -f "$package" ]; then
               echo "Pushing $package to OCI registry"
-              helm push "$package" oci://ghcr.io/${{ github.repository_owner }}/charts
+              helm push "$package" "oci://ghcr.io/${REPO_OWNER}/helm-charts"
+              if [ $? -eq 0 ]; then
+                echo "Successfully pushed $package"
+              else
+                echo "Failed to push $package"
+                exit 1
+              fi
             fi
           done
 
@@ -245,6 +260,12 @@ jobs:
       - name: Log in to GitHub Container Registry
         run: |
           echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+          if [ $? -eq 0 ]; then
+            echo "Successfully logged in to ghcr.io"
+          else
+            echo "Failed to log in to ghcr.io"
+            exit 1
+          fi
 
       - name: Update chart versions
         run: |
@@ -262,6 +283,9 @@ jobs:
 
       - name: Package and release Helm charts
         run: |
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "Repository owner (lowercase): $REPO_OWNER"
+
           mkdir -p ./release-charts
           for chart in helm/*/; do
             if [ -f "$chart/Chart.yaml" ]; then
@@ -273,7 +297,14 @@ jobs:
               # Push to OCI registry with release tag
               for package in release-charts/${chart_name}-*.tgz; do
                 if [ -f "$package" ]; then
-                  helm push "$package" oci://ghcr.io/${{ github.repository_owner }}/charts
+                  echo "Pushing $package to OCI registry"
+                  helm push "$package" "oci://ghcr.io/${REPO_OWNER}/helm-charts"
+                  if [ $? -eq 0 ]; then
+                    echo "Successfully pushed $package"
+                  else
+                    echo "Failed to push $package"
+                    exit 1
+                  fi
                 fi
               done
             fi
