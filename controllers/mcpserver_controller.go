@@ -1081,7 +1081,9 @@ func (r *MCPServerReconciler) vpaForMCPServer(mcpServer *mcpv1.MCPServer) *unstr
 	vpa.Object["spec"] = spec
 
 	// Set MCPServer instance as the owner and controller
-	controllerutil.SetControllerReference(mcpServer, vpa, r.Scheme)
+	if err := controllerutil.SetControllerReference(mcpServer, vpa, r.Scheme); err != nil {
+		return nil
+	}
 	return vpa
 }
 
@@ -1981,7 +1983,9 @@ func (r *MCPServerReconciler) networkPolicyForMCPServer(mcpServer *mcpv1.MCPServ
 	}
 
 	// Set MCPServer instance as the owner and controller
-	controllerutil.SetControllerReference(mcpServer, networkPolicy, r.Scheme)
+	if err := controllerutil.SetControllerReference(mcpServer, networkPolicy, r.Scheme); err != nil {
+		return nil
+	}
 	return networkPolicy
 }
 

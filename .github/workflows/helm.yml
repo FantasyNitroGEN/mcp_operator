@@ -23,9 +23,49 @@ env:
   HELM_VERSION: v3.14.0
 
 jobs:
+  setup:
+    name: Setup Helm Environment
+    runs-on: ubuntu-latest
+    outputs:
+      charts-changed: ${{ steps.list.outputs.changed }}
+      helm-cache-key: ${{ steps.cache-key.outputs.key }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Generate cache key
+        id: cache-key
+        run: echo "key=helm-${{ env.HELM_VERSION }}-${{ hashFiles('helm/**/Chart.yaml', 'helm/**/Chart.lock') }}" >> $GITHUB_OUTPUT
+
+      - name: Cache Helm repositories
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/helm/repository
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: |
+            helm-${{ env.HELM_VERSION }}-
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+
+      - name: Run chart-testing (list-changed)
+        id: list
+        run: ct list-changed --target-branch ${{ github.event.repository.default_branch }}
+
   lint-and-test:
     name: Lint and Test Helm Charts
     runs-on: ubuntu-latest
+    needs: setup
+    if: needs.setup.outputs.charts-changed == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,32 +81,26 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-          check-latest: true
+          cache: 'pip'
 
       - name: Set up chart-testing
         uses: helm/chart-testing-action@v2.6.1
 
-      - name: Add Helm repositories
-        run: |
-          helm repo add bitnami https://charts.bitnami.com/bitnami
-          helm repo update
-
-      - name: Run chart-testing (list-changed)
-        id: list
-        run: ct list-changed --target-branch ${{ github.event.repository.default_branch }}
+      - name: Restore Helm repositories cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/helm/repository
+          key: ${{ needs.setup.outputs.helm-cache-key }}
 
       - name: Run chart-testing (lint)
-        if: steps.list.outputs.changed == 'true'
         run: ct lint --target-branch ${{ github.event.repository.default_branch }}
 
       - name: Create kind cluster
-        if: steps.list.outputs.changed == 'true'
         uses: helm/kind-action@v1.10.0
         with:
           wait: 300s
 
       - name: Run chart-testing (install)
-        if: steps.list.outputs.changed == 'true'
         run: ct install --target-branch ${{ github.event.repository.default_branch }}
 
   security-scan:
