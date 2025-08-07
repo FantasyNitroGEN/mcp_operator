@@ -71,10 +71,10 @@ jobs:
             BUILDKIT_INLINE_CACHE=1
           cache-from: |
             type=gha,scope=${{ github.workflow }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.event.repository.name }}:buildcache
+            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner | lower }}/${{ github.event.repository.name | lower }}:buildcache
           cache-to: |
             type=gha,scope=${{ github.workflow }},mode=max
-            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ github.event.repository.name }}:buildcache,mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ github.repository_owner | lower }}/${{ github.event.repository.name | lower}}:buildcache,mode=max
           outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || 'type=registry' }}
 
   security-scan:
