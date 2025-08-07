@@ -182,13 +182,21 @@ func (s *Syncer) downloadFromDockerRegistry(ctx context.Context, serverName stri
 	tempDir := filepath.Join(os.TempDir(), "mcp-registry-temp")
 
 	// Удаляем временную директорию если есть
-	os.RemoveAll(tempDir)
+	err := os.RemoveAll(tempDir)
+	if err != nil {
+		return err
+	}
 
 	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", repoURL, tempDir)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to clone registry: %w", err)
 	}
-	defer os.RemoveAll(tempDir)
+	defer func(path string) {
+		err := os.RemoveAll(path)
+		if err != nil {
+			fmt.Printf("failed to remove temp dir: %v\n", err)
+		}
+	}(tempDir)
 
 	// Копируем папку сервера
 	serverDir := filepath.Join(tempDir, "servers", serverName)
@@ -457,7 +465,7 @@ func (s *Syncer) SyncFromLocalRegistry(registryPath string) error {
 func (s *Syncer) generateDockerfile(serverName, runtimeType string) string {
 	switch runtimeType {
 	case "node":
-		return fmt.Sprintf(`FROM node:18-alpine
+		return `FROM node:18-alpine
 
 WORKDIR /app
 
@@ -471,10 +479,10 @@ COPY . .
 EXPOSE 8080
 
 CMD ["npm", "start"]
-`)
+`
 
 	case "go":
-		return fmt.Sprintf(`FROM golang:1.21-alpine AS builder
+		return `FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
@@ -492,7 +500,7 @@ COPY --from=builder /app/main .
 
 EXPOSE 8080
 CMD ["./main"]
-`)
+`
 
 	default: // python
 		return fmt.Sprintf(`FROM python:3.11-slim

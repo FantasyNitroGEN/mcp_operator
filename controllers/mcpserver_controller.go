@@ -724,7 +724,9 @@ func (r *MCPServerReconciler) deploymentForMCPServer(mcpServer *mcpv1.MCPServer)
 	}
 
 	// Set MCPServer instance as the owner and controller
-	controllerutil.SetControllerReference(mcpServer, dep, r.Scheme)
+	if err := controllerutil.SetControllerReference(mcpServer, dep, r.Scheme); err != nil {
+		return nil
+	}
 	return dep
 }
 
@@ -757,7 +759,9 @@ func (r *MCPServerReconciler) serviceForMCPServer(mcpServer *mcpv1.MCPServer) *c
 	}
 
 	// Set MCPServer instance as the owner and controller
-	controllerutil.SetControllerReference(mcpServer, srv, r.Scheme)
+	if err := controllerutil.SetControllerReference(mcpServer, srv, r.Scheme); err != nil {
+		return nil
+	}
 	return srv
 }
 
@@ -801,7 +805,9 @@ func (r *MCPServerReconciler) hpaForMCPServer(mcpServer *mcpv1.MCPServer) *autos
 	}
 
 	// Set MCPServer instance as the owner and controller
-	controllerutil.SetControllerReference(mcpServer, hpa, r.Scheme)
+	if err := controllerutil.SetControllerReference(mcpServer, hpa, r.Scheme); err != nil {
+		return nil
+	}
 	return hpa
 }
 

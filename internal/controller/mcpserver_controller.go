@@ -38,7 +38,7 @@ type MCPServerReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	logs := log.FromContext(ctx)
 
 	// Получаем MCPServer ресурс
 	var mcpServer mcpv1.MCPServer
@@ -47,7 +47,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			// Ресурс был удален, ничего не делаем
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "unable to fetch MCPServer")
+		logs.Error(err, "unable to fetch MCPServer")
 		return ctrl.Result{}, err
 	}
 
@@ -57,14 +57,14 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		mcpServer.Status.Message = "Starting MCP server deployment"
 		mcpServer.Status.LastUpdateTime = &metav1.Time{Time: time.Now()}
 		if err := r.Status().Update(ctx, &mcpServer); err != nil {
-			log.Error(err, "unable to update MCPServer status")
+			logs.Error(err, "unable to update MCPServer status")
 			return ctrl.Result{}, err
 		}
 	}
 
 	// Получаем спецификацию из реестра если нужно
 	if err := r.enrichFromRegistry(ctx, &mcpServer); err != nil {
-		log.Error(err, "unable to enrich from registry")
+		logs.Error(err, "unable to enrich from registry")
 		r.updateStatus(ctx, &mcpServer, mcpv1.MCPServerPhaseFailed,
 			"Failed to get server spec from registry", err.Error())
 		return ctrl.Result{RequeueAfter: time.Minute * 5}, err
@@ -72,7 +72,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Создаем или обновляем Deployment
 	if err := r.reconcileDeployment(ctx, &mcpServer); err != nil {
-		log.Error(err, "unable to reconcile Deployment")
+		logs.Error(err, "unable to reconcile Deployment")
 		r.updateStatus(ctx, &mcpServer, mcpv1.MCPServerPhaseFailed,
 			"Failed to create deployment", err.Error())
 		return ctrl.Result{}, err
@@ -80,7 +80,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Создаем или обновляем Service
 	if err := r.reconcileService(ctx, &mcpServer); err != nil {
-		log.Error(err, "unable to reconcile Service")
+		logs.Error(err, "unable to reconcile Service")
 		r.updateStatus(ctx, &mcpServer, mcpv1.MCPServerPhaseFailed,
 			"Failed to create service", err.Error())
 		return ctrl.Result{}, err
@@ -88,7 +88,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Обновляем статус
 	if err := r.updateStatusFromDeployment(ctx, &mcpServer); err != nil {
-		log.Error(err, "unable to update status from deployment")
+		logs.Error(err, "unable to update status from deployment")
 		return ctrl.Result{}, err
 	}
 
@@ -325,7 +325,9 @@ func (r *MCPServerReconciler) updateStatus(ctx context.Context, mcpServer *mcpv1
 	mcpServer.Status.Message = message
 	mcpServer.Status.Reason = reason
 	mcpServer.Status.LastUpdateTime = &metav1.Time{Time: time.Now()}
-	r.Status().Update(ctx, mcpServer)
+	if err := r.Status().Update(ctx, mcpServer); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to update MCPServer status")
+	}
 }
 
 func (r *MCPServerReconciler) updateStatusFromDeployment(ctx context.Context, mcpServer *mcpv1.MCPServer) error {
