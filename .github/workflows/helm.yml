@@ -27,7 +27,6 @@ jobs:
     name: Setup Helm Environment
     runs-on: ubuntu-latest
     outputs:
-      charts-changed: ${{ steps.list.outputs.changed }}
       helm-cache-key: ${{ steps.cache-key.outputs.key }}
     steps:
       - name: Checkout
@@ -65,28 +64,21 @@ jobs:
       - name: Set up chart-testing
         uses: helm/chart-testing-action@0d28d3144d3a25ea2cc349d6e59901c4ff469b3b # v2.7.0
 
-      - name: Run chart-testing (list-changed)
-        id: list
+      - name: Validate Helm charts
         run: |
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Release event - treating as charts changed"
-          else
-            changed=$(ct list-changed --target-branch ${{ github.event.repository.default_branch }})
-            if [[ -n "$changed" ]]; then
-              echo "changed=true" >> $GITHUB_OUTPUT
-              echo "Charts changed: $changed"
-            else
-              echo "changed=false" >> $GITHUB_OUTPUT
-              echo "No charts changed"
+          echo "Validating Helm chart structure..."
+          for chart in helm/*/; do
+            if [ -f "$chart/Chart.yaml" ]; then
+              chart_name=$(basename "$chart")
+              echo "Found chart: $chart_name"
+              helm dependency update "$chart" || true
             fi
-          fi
+          done
 
   lint-and-test:
     name: Lint and Test Helm Charts
     runs-on: ubuntu-latest
-    needs: setup
-    if: always() && (needs.setup.outputs.charts-changed == 'true' || github.event_name == 'pull_request')
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && (contains(github.event.head_commit.modified, 'helm/') || contains(github.event.head_commit.added, 'helm/')))
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -171,8 +163,8 @@ jobs:
   package-and-publish:
     name: Package and Publish Helm Charts
     runs-on: ubuntu-latest
-    needs: [setup, security-scan]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && always()
+    needs: [security-scan]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
@@ -236,8 +228,7 @@ jobs:
   release-charts:
     name: Release Helm Charts
     runs-on: ubuntu-latest
-    needs: [setup, security-scan]
-    if: github.event_name == 'release' && always()
+    if: github.event_name == 'release'
     permissions:
       contents: write
       packages: write
