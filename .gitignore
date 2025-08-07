@@ -19,6 +19,7 @@ go.work
 
 # IDE files
 .vscode/
+.idea/
 *.swp
 *.swo
 *~
@@ -53,6 +54,7 @@ dist/
 # Helm charts dependencies
 charts/
 *.tgz
+*.tar
 
 # Local development files
 .env
