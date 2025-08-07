@@ -138,7 +138,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		logger.Info("Finalizer added successfully", "phase", "finalizer_addition")
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second * 1}, nil
 	}
 
 	// Check for registry loading annotation
@@ -231,7 +231,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		metrics.RecordDeploymentOperation(mcpServer.Namespace, "create", "success")
 
 		// Deployment created successfully - return and requeue
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second * 1}, nil
 	} else if err != nil {
 		logger.Error(err, "Failed to get Deployment",
 			"phase", "deployment_reconciliation",
@@ -287,7 +287,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		metrics.RecordServiceOperation(mcpServer.Namespace, "create", "success")
 
 		// Service created successfully - return and requeue
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second * 1}, nil
 	} else if err != nil {
 		logger.Error(err, "Failed to get Service",
 			"phase", "service_reconciliation",
@@ -344,7 +344,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			metrics.RecordServiceOperation(mcpServer.Namespace, "hpa_create", "success")
 
 			// HPA created successfully - return and requeue
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: time.Second * 1}, nil
 		} else if err != nil {
 			logger.Error(err, "Failed to get HPA",
 				"phase", "hpa_reconciliation",
@@ -419,7 +419,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			metrics.RecordServiceOperation(mcpServer.Namespace, "vpa_create", "success")
 
 			// VPA created successfully - return and requeue
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: time.Second * 1}, nil
 		} else if err != nil {
 			logger.Error(err, "Failed to get VPA",
 				"phase", "vpa_reconciliation",
@@ -683,7 +683,7 @@ func (r *MCPServerReconciler) deploymentForMCPServer(mcpServer *mcpv1.MCPServer)
 							ProbeHandler: corev1.ProbeHandler{
 								HTTPGet: &corev1.HTTPGetAction{
 									Path: "/health",
-									Port: intstr.FromInt(int(port)),
+									Port: intstr.FromInt32(port),
 								},
 							},
 							InitialDelaySeconds: 30,
@@ -696,7 +696,7 @@ func (r *MCPServerReconciler) deploymentForMCPServer(mcpServer *mcpv1.MCPServer)
 							ProbeHandler: corev1.ProbeHandler{
 								HTTPGet: &corev1.HTTPGetAction{
 									Path: "/ready",
-									Port: intstr.FromInt(int(port)),
+									Port: intstr.FromInt32(port),
 								},
 							},
 							InitialDelaySeconds: 5,
@@ -752,7 +752,7 @@ func (r *MCPServerReconciler) serviceForMCPServer(mcpServer *mcpv1.MCPServer) *c
 			Type:     serviceType,
 			Ports: []corev1.ServicePort{{
 				Port:       port,
-				TargetPort: intstr.FromInt(int(port)),
+				TargetPort: intstr.FromInt32(port),
 				Name:       "http",
 			}},
 		},
@@ -813,11 +813,11 @@ func (r *MCPServerReconciler) hpaForMCPServer(mcpServer *mcpv1.MCPServer) *autos
 
 // buildHPAMetrics converts MCPServer HPA metrics to Kubernetes HPA metrics
 func (r *MCPServerReconciler) buildHPAMetrics(hpaSpec *mcpv1.HPASpec) []autoscalingv2.MetricSpec {
-	var metrics []autoscalingv2.MetricSpec
+	var metricsspec []autoscalingv2.MetricSpec
 
 	// Add CPU utilization metric if specified
 	if hpaSpec.TargetCPUUtilizationPercentage != nil {
-		metrics = append(metrics, autoscalingv2.MetricSpec{
+		metricsspec = append(metricsspec, autoscalingv2.MetricSpec{
 			Type: autoscalingv2.ResourceMetricSourceType,
 			Resource: &autoscalingv2.ResourceMetricSource{
 				Name: corev1.ResourceCPU,
@@ -831,7 +831,7 @@ func (r *MCPServerReconciler) buildHPAMetrics(hpaSpec *mcpv1.HPASpec) []autoscal
 
 	// Add Memory utilization metric if specified
 	if hpaSpec.TargetMemoryUtilizationPercentage != nil {
-		metrics = append(metrics, autoscalingv2.MetricSpec{
+		metricsspec = append(metricsspec, autoscalingv2.MetricSpec{
 			Type: autoscalingv2.ResourceMetricSourceType,
 			Resource: &autoscalingv2.ResourceMetricSource{
 				Name: corev1.ResourceMemory,
@@ -843,18 +843,18 @@ func (r *MCPServerReconciler) buildHPAMetrics(hpaSpec *mcpv1.HPASpec) []autoscal
 		})
 	}
 
-	// Add custom metrics if specified
+	// Add custom metricsspec if specified
 	for _, customMetric := range hpaSpec.Metrics {
 		k8sMetric := r.convertCustomMetric(customMetric)
 		if k8sMetric != nil {
-			metrics = append(metrics, *k8sMetric)
+			metricsspec = append(metricsspec, *k8sMetric)
 		}
 	}
 
-	// If no metrics specified, use default CPU utilization of 70%
-	if len(metrics) == 0 {
+	// If no metricsspec specified, use default CPU utilization of 70%
+	if len(metricsspec) == 0 {
 		defaultCPUUtilization := int32(70)
-		metrics = append(metrics, autoscalingv2.MetricSpec{
+		metricsspec = append(metricsspec, autoscalingv2.MetricSpec{
 			Type: autoscalingv2.ResourceMetricSourceType,
 			Resource: &autoscalingv2.ResourceMetricSource{
 				Name: corev1.ResourceCPU,
@@ -866,7 +866,7 @@ func (r *MCPServerReconciler) buildHPAMetrics(hpaSpec *mcpv1.HPASpec) []autoscal
 		})
 	}
 
-	return metrics
+	return metricsspec
 }
 
 // buildHPABehavior converts MCPServer HPA behavior to Kubernetes HPA behavior
@@ -1059,8 +1059,8 @@ func (r *MCPServerReconciler) vpaForMCPServer(mcpServer *mcpv1.MCPServer) *unstr
 
 				if len(policy.ControlledResources) > 0 {
 					controlledResources := make([]string, len(policy.ControlledResources))
-					for i, resource := range policy.ControlledResources {
-						controlledResources[i] = string(resource)
+					for i, ctrlResource := range policy.ControlledResources {
+						controlledResources[i] = string(ctrlResource)
 					}
 					containerPolicy["controlledResources"] = controlledResources
 				}
@@ -1217,7 +1217,7 @@ func (r *MCPServerReconciler) buildVolumes(mcpServer *mcpv1.MCPServer) []corev1.
 						Path: key,
 					})
 				}
-				volume.VolumeSource.ConfigMap.Items = items
+				volume.ConfigMap.Items = items
 			}
 		}
 
@@ -1238,7 +1238,7 @@ func (r *MCPServerReconciler) buildVolumes(mcpServer *mcpv1.MCPServer) []corev1.
 						Path: key,
 					})
 				}
-				volume.VolumeSource.Secret.Items = items
+				volume.Secret.Items = items
 			}
 		}
 
@@ -1656,21 +1656,21 @@ func (r *MCPServerReconciler) validateTenantResourceQuotas(ctx context.Context, 
 	// Validate Memory quota
 	if quotas.Memory != nil {
 		if err := r.validateMemoryQuota(ctx, mcpServer, quotas.Memory); err != nil {
-			return fmt.Errorf("Memory quota validation failed: %w", err)
+			return fmt.Errorf("memory quota validation failed: %w", err)
 		}
 	}
 
 	// Validate Pod quota
 	if quotas.Pods != nil {
 		if err := r.validatePodQuota(ctx, mcpServer, quotas.Pods); err != nil {
-			return fmt.Errorf("Pod quota validation failed: %w", err)
+			return fmt.Errorf("pod quota validation failed: %w", err)
 		}
 	}
 
 	// Validate Service quota
 	if quotas.Services != nil {
 		if err := r.validateServiceQuota(ctx, mcpServer, quotas.Services); err != nil {
-			return fmt.Errorf("Service quota validation failed: %w", err)
+			return fmt.Errorf("service quota validation failed: %w", err)
 		}
 	}
 
@@ -1906,11 +1906,11 @@ func (r *MCPServerReconciler) createNetworkPolicyForTenant(ctx context.Context, 
 
 	networkPolicy := r.networkPolicyForMCPServer(mcpServer)
 
-	// Check if network policy already exists
+	// Check if a network policy already exists
 	existingPolicy := &networkingv1.NetworkPolicy{}
 	err := r.Get(ctx, types.NamespacedName{Name: networkPolicy.Name, Namespace: networkPolicy.Namespace}, existingPolicy)
 	if err != nil && errors.IsNotFound(err) {
-		// Create new network policy
+		// Create a new network policy
 		logger.Info("Creating new NetworkPolicy",
 			"policy_name", networkPolicy.Name,
 			"tenant", mcpServer.Spec.Tenancy.TenantID,
@@ -2164,11 +2164,11 @@ func (r *MCPServerReconciler) buildDefaultEgressRules(mcpServer *mcpv1.MCPServer
 		Ports: []networkingv1.NetworkPolicyPort{
 			{
 				Protocol: &[]corev1.Protocol{corev1.ProtocolUDP}[0],
-				Port:     &[]intstr.IntOrString{intstr.FromInt(53)}[0],
+				Port:     &[]intstr.IntOrString{intstr.FromInt32(53)}[0],
 			},
 			{
 				Protocol: &[]corev1.Protocol{corev1.ProtocolTCP}[0],
-				Port:     &[]intstr.IntOrString{intstr.FromInt(53)}[0],
+				Port:     &[]intstr.IntOrString{intstr.FromInt32(53)}[0],
 			},
 		},
 	}
@@ -2214,15 +2214,16 @@ func (r *MCPServerReconciler) updateMCPServerStatus(ctx context.Context, mcpServ
 	mcpServer.Status.AvailableReplicas = deployment.Status.AvailableReplicas
 
 	// Determine phase
-	if deployment.Status.ReadyReplicas == 0 {
+	switch readyReplicas := deployment.Status.ReadyReplicas; {
+	case readyReplicas == 0:
 		mcpServer.Status.Phase = "Pending"
 		mcpServer.Status.Message = "Waiting for pods to be ready"
-	} else if deployment.Status.ReadyReplicas == *deployment.Spec.Replicas {
+	case readyReplicas == *deployment.Spec.Replicas:
 		mcpServer.Status.Phase = "Running"
 		mcpServer.Status.Message = "All replicas are ready"
-	} else {
+	default:
 		mcpServer.Status.Phase = "Pending"
-		mcpServer.Status.Message = fmt.Sprintf("Ready replicas: %d/%d", deployment.Status.ReadyReplicas, *deployment.Spec.Replicas)
+		mcpServer.Status.Message = fmt.Sprintf("Ready replicas: %d/%d", readyReplicas, *deployment.Spec.Replicas)
 	}
 
 	// Set service endpoint

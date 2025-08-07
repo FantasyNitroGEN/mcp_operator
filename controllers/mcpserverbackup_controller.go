@@ -104,7 +104,7 @@ func (r *MCPServerBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 
 		logger.Info("Finalizer added successfully")
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second * 1}, nil
 	}
 
 	// Check if backup is suspended

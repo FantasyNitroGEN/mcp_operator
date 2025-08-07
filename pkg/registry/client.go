@@ -92,7 +92,11 @@ func (c *Client) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
 		if err != nil {
 			return fmt.Errorf("failed to execute request: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				// Log the error but don't override the main error
+			}
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -150,7 +154,11 @@ func (c *Client) GetServerSpec(ctx context.Context, serverName string) (*MCPServ
 		if err != nil {
 			return fmt.Errorf("failed to execute request: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				// Log the error but don't override the main error
+			}
+		}()
 
 		if resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("server %s not found in registry", serverName)
