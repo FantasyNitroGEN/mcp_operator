@@ -132,8 +132,8 @@ func (c *Client) GetServerSpec(ctx context.Context, serverName string) (*MCPServ
 	var spec *MCPServerSpec
 
 	err := c.circuitBreaker.Call(ctx, func(ctx context.Context) error {
-		// URL для получения mcp.yaml файла сервера
-		specURL := fmt.Sprintf("%s/%s/mcp.yaml", c.baseURL, serverName)
+		// URL для получения server.yaml файла сервера
+		specURL := fmt.Sprintf("%s/%s/server.yaml", c.baseURL, serverName)
 
 		req, err := http.NewRequestWithContext(ctx, "GET", specURL, nil)
 		if err != nil {

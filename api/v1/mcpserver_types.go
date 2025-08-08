@@ -852,6 +852,9 @@ const (
 
 	// MCPServerConditionProgressing сервер в процессе развертывания
 	MCPServerConditionProgressing MCPServerConditionType = "Progressing"
+
+	// MCPServerConditionRegistryFetched спецификация успешно загружена из реестра
+	MCPServerConditionRegistryFetched MCPServerConditionType = "RegistryFetched"
 )
 
 //+kubebuilder:object:root=true

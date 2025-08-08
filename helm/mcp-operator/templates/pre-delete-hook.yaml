@@ -1,0 +1,114 @@
+{{- if .Values.crds.install }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "mcp-operator.fullname" . }}-cleanup
+  namespace: {{ include "mcp-operator.namespace" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cleanup
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    metadata:
+      name: {{ include "mcp-operator.fullname" . }}-cleanup
+      labels:
+        {{- include "mcp-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: cleanup
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "mcp-operator.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.operator.podSecurityContext | nindent 8 }}
+      containers:
+      - name: cleanup
+        image: bitnami/kubectl:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          {{- toYaml .Values.operator.securityContext | nindent 10 }}
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Starting MCP Server cleanup process..."
+          
+          # Function to safely delete MCPServers in a namespace
+          cleanup_namespace() {
+            local namespace=$1
+            echo "Checking namespace: $namespace"
+            
+            # Get all MCPServers in the namespace
+            mcpservers=$(kubectl get mcpserver -n "$namespace" -o name 2>/dev/null || echo "")
+            
+            if [ -n "$mcpservers" ]; then
+              echo "Found MCPServers in namespace $namespace:"
+              echo "$mcpservers"
+              
+              # Delete each MCPServer
+              for mcpserver in $mcpservers; do
+                echo "Deleting $mcpserver in namespace $namespace..."
+                kubectl delete "$mcpserver" -n "$namespace" --timeout=60s || true
+              done
+              
+              # Wait for MCPServers to be fully deleted
+              echo "Waiting for MCPServers to be deleted in namespace $namespace..."
+              kubectl wait --for=delete mcpserver --all -n "$namespace" --timeout=120s || true
+            else
+              echo "No MCPServers found in namespace $namespace"
+            fi
+          }
+          
+          # Get all namespaces
+          echo "Getting all namespaces..."
+          namespaces=$(kubectl get namespaces -o name | sed 's/namespace\///')
+          
+          # Clean up MCPServers in each namespace
+          for namespace in $namespaces; do
+            cleanup_namespace "$namespace"
+          done
+          
+          # Also clean up MCPServerBackups if they exist
+          echo "Cleaning up MCPServerBackups..."
+          for namespace in $namespaces; do
+            echo "Checking MCPServerBackups in namespace: $namespace"
+            backups=$(kubectl get mcpserverbackup -n "$namespace" -o name 2>/dev/null || echo "")
+            
+            if [ -n "$backups" ]; then
+              echo "Found MCPServerBackups in namespace $namespace:"
+              echo "$backups"
+              
+              for backup in $backups; do
+                echo "Deleting $backup in namespace $namespace..."
+                kubectl delete "$backup" -n "$namespace" --timeout=60s || true
+              done
+              
+              echo "Waiting for MCPServerBackups to be deleted in namespace $namespace..."
+              kubectl wait --for=delete mcpserverbackup --all -n "$namespace" --timeout=120s || true
+            fi
+          done
+          
+          echo "MCP Server cleanup completed successfully!"
+        resources:
+          limits:
+            cpu: 100m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+      {{- with .Values.operator.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.operator.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.operator.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

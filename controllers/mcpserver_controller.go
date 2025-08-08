@@ -142,43 +142,40 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: time.Second * 1}, nil
 	}
 
-	// Auto-load server from registry if server name is specified but runtime image is empty
-	if mcpServer.Spec.Registry.Name != "" && mcpServer.Spec.Runtime.Image == "" {
-		logger.Info("Auto-loading server from registry",
+	// Auto-enrich server from registry if server name is specified
+	if mcpServer.Spec.Registry.Name != "" {
+		logger.Info("Enriching server from registry",
 			"server_name", mcpServer.Spec.Registry.Name,
-			"phase", "auto_registry_loading",
+			"phase", "registry_enrichment",
 		)
 
 		registryStartTime := time.Now()
-		if err := r.loadServerFromRegistry(ctx, mcpServer, mcpServer.Spec.Registry.Name); err != nil {
-			logger.Error(err, "Failed to auto-load server from registry",
+		if err := r.enrichFromRegistry(ctx, mcpServer); err != nil {
+			logger.Error(err, "Failed to enrich server from registry",
 				"server_name", mcpServer.Spec.Registry.Name,
-				"phase", "auto_registry_loading",
+				"phase", "registry_enrichment",
 				"duration", time.Since(registryStartTime),
-				"error_type", "registry_load_error",
+				"error_type", "registry_enrich_error",
 			)
 			metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.Name, "error", time.Since(registryStartTime).Seconds())
-			return ctrl.Result{}, err
-		}
-
-		logger.Info("Successfully auto-loaded server from registry",
-			"server_name", mcpServer.Spec.Registry.Name,
-			"phase", "auto_registry_loading",
-			"duration", time.Since(registryStartTime),
-		)
-		metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.Name, "success", time.Since(registryStartTime).Seconds())
-
-		// Update the MCPServer with loaded configuration
-		if err := r.Update(ctx, mcpServer); err != nil {
-			logger.Error(err, "Failed to update MCPServer with loaded configuration",
-				"phase", "auto_registry_loading",
-				"error_type", "update_error",
+			// Don't return error here - continue with deployment even if registry enrichment fails
+			// The status condition will reflect the failure
+		} else {
+			logger.Info("Successfully enriched server from registry",
+				"server_name", mcpServer.Spec.Registry.Name,
+				"phase", "registry_enrichment",
+				"duration", time.Since(registryStartTime),
 			)
-			return ctrl.Result{}, err
+			metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.Name, "success", time.Since(registryStartTime).Seconds())
 		}
 
-		logger.Info("MCPServer updated with loaded configuration", "phase", "auto_registry_loading")
-		return ctrl.Result{RequeueAfter: time.Second * 2}, nil
+		// Update status after registry enrichment
+		if err := r.Status().Update(ctx, mcpServer); err != nil {
+			logger.Error(err, "Failed to update MCPServer status after registry enrichment",
+				"phase", "registry_enrichment",
+				"error_type", "status_update_error",
+			)
+		}
 	}
 
 	// Check for registry loading annotation (legacy support)
@@ -2281,17 +2278,24 @@ func (r *MCPServerReconciler) updateMCPServerStatus(ctx context.Context, mcpServ
 
 // enrichFromRegistry обогащает MCPServer данными из реестра
 func (r *MCPServerReconciler) enrichFromRegistry(ctx context.Context, mcpServer *mcpv1.MCPServer) error {
+	logger := log.FromContext(ctx)
+
 	if r.RegistryClient == nil {
+		r.setRegistryCondition(mcpServer, metav1.ConditionFalse, "RegistryClientNotConfigured", "Registry client is not configured")
 		return nil // Регистр не настроен
 	}
 
 	// Если данные уже есть, пропускаем
 	if mcpServer.Spec.Registry.Version != "" && mcpServer.Spec.Runtime.Image != "" {
+		r.setRegistryCondition(mcpServer, metav1.ConditionTrue, "RegistryDataAlreadyPresent", "Registry data is already present in the spec")
 		return nil
 	}
 
+	logger.Info("Fetching server specification from registry", "serverName", mcpServer.Spec.Registry.Name)
+
 	spec, err := r.RegistryClient.GetServerSpec(ctx, mcpServer.Spec.Registry.Name)
 	if err != nil {
+		r.setRegistryCondition(mcpServer, metav1.ConditionFalse, "RegistryFetchFailed", fmt.Sprintf("Failed to fetch server spec from registry: %v", err))
 		return fmt.Errorf("failed to get server spec: %w", err)
 	}
 
@@ -2318,7 +2322,56 @@ func (r *MCPServerReconciler) enrichFromRegistry(ctx context.Context, mcpServer 
 		mcpServer.Spec.Runtime.Args = spec.Runtime.Args
 	}
 
+	// Обогащаем переменные окружения из реестра
+	if mcpServer.Spec.Runtime.Env == nil {
+		mcpServer.Spec.Runtime.Env = make(map[string]string)
+	}
+	for k, v := range spec.Runtime.Env {
+		if _, exists := mcpServer.Spec.Runtime.Env[k]; !exists {
+			mcpServer.Spec.Runtime.Env[k] = v
+		}
+	}
+
+	r.setRegistryCondition(mcpServer, metav1.ConditionTrue, "RegistryFetchSuccessful", "Successfully fetched and applied server specification from registry")
+
+	logger.Info("Successfully enriched MCPServer with registry data",
+		"serverName", mcpServer.Spec.Registry.Name,
+		"version", spec.Version,
+		"image", spec.Runtime.Image)
+
 	return r.Update(ctx, mcpServer)
+}
+
+// setRegistryCondition устанавливает условие RegistryFetched в статусе MCPServer
+func (r *MCPServerReconciler) setRegistryCondition(mcpServer *mcpv1.MCPServer, status metav1.ConditionStatus, reason, message string) {
+	condition := mcpv1.MCPServerCondition{
+		Type:               mcpv1.MCPServerConditionRegistryFetched,
+		Status:             status,
+		LastTransitionTime: metav1.Now(),
+		Reason:             reason,
+		Message:            message,
+	}
+
+	// Найти существующее условие или добавить новое
+	found := false
+	for i, existingCondition := range mcpServer.Status.Conditions {
+		if existingCondition.Type == mcpv1.MCPServerConditionRegistryFetched {
+			// Обновляем только если статус изменился
+			if existingCondition.Status != status {
+				mcpServer.Status.Conditions[i] = condition
+			} else {
+				// Обновляем сообщение и причину, но не время перехода
+				mcpServer.Status.Conditions[i].Reason = reason
+				mcpServer.Status.Conditions[i].Message = message
+			}
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		mcpServer.Status.Conditions = append(mcpServer.Status.Conditions, condition)
+	}
 }
 
 // reconcileDeployment создает или обновляет Deployment

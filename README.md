@@ -33,8 +33,12 @@ MCP (Model Context Protocol) Operator - это Kubernetes-оператор, ко
 
 ### Интеграция с реестром
 - ✅ **Автоматическая загрузка** спецификаций серверов из MCP Registry
+- ✅ **Автоматическое обогащение** MCPServer ресурсов данными из реестра
+- ✅ **Хранение в Kubernetes** - данные реестра сохраняются в etcd, а не только на файловой системе
+- ✅ **Статус-трекинг** операций загрузки из реестра с детальными условиями
 - ✅ **Синхронизация** конфигураций с внешними источниками
 - ✅ **Метрики реестра** для отслеживания операций загрузки
+- ✅ **CLI инструменты** для работы с реестром и развертывания серверов
 
 ### Управление зависимостями
 - ✅ **Renovate Bot** для автоматического обновления зависимостей
@@ -114,6 +118,72 @@ make install
 make run
 ```
 
+## MCP CLI
+
+MCP Operator поставляется с удобным CLI инструментом для управления MCP серверами без необходимости создавать YAML манифесты вручную.
+
+### Установка CLI
+
+#### Сборка из исходного кода
+
+```bash
+# Склонируйте репозиторий (если еще не сделали)
+git clone https://github.com/FantasyNitroGEN/mcp_operator.git
+cd mcp-operator
+
+# Соберите CLI
+go build -o bin/mcp ./cmd/mcp
+
+# Переместите в PATH (опционально)
+sudo mv bin/mcp /usr/local/bin/
+```
+
+### Использование CLI
+
+#### Просмотр доступных серверов в реестре
+
+```bash
+# Список всех доступных MCP серверов
+mcp registry list
+
+# Поиск серверов по ключевому слову
+mcp registry search filesystem
+
+# Список с JSON выводом
+mcp registry list --format json
+```
+
+#### Развертывание серверов
+
+```bash
+# Развернуть сервер из реестра
+mcp deploy filesystem-server
+
+# Развернуть в определенный namespace
+mcp deploy filesystem-server --namespace mcp-servers
+
+# Развернуть с несколькими репликами
+mcp deploy filesystem-server --replicas 3
+
+# Предварительный просмотр (dry-run)
+mcp deploy filesystem-server --dry-run
+
+# Развернуть и дождаться готовности
+mcp deploy filesystem-server --wait --wait-timeout 5m
+```
+
+#### Дополнительные команды
+
+```bash
+# Показать версию CLI
+mcp version
+
+# Помощь по командам
+mcp --help
+mcp registry --help
+mcp deploy --help
+```
+
 ### Развертывание MCP сервера
 
 Создайте файл с описанием MCP сервера:
@@ -147,6 +217,37 @@ spec:
 kubectl apply -f mcpserver.yaml
 ```
 
+#### Развертывание с автоматическим обогащением из реестра
+
+Новая возможность! Теперь вы можете создать MCPServer, указав только имя сервера из реестра, и оператор автоматически заполнит все необходимые поля:
+
+```yaml
+apiVersion: mcp.allbeone.io/v1
+kind: MCPServer
+metadata:
+  name: filesystem-server
+spec:
+  registry:
+    name: filesystem-server  # Имя сервера из MCP Registry
+  runtime:
+    type: python  # Тип среды выполнения (будет обогащен из реестра)
+  # Оператор автоматически заполнит:
+  # - registry.version, registry.description, registry.repository и т.д.
+  # - runtime.image, runtime.command, runtime.args
+  # - runtime.env (переменные окружения)
+```
+
+Примените конфигурацию:
+```bash
+kubectl apply -f mcpserver-registry.yaml
+```
+
+Оператор автоматически:
+1. Загрузит спецификацию сервера из MCP Registry
+2. Обогатит ресурс данными из реестра
+3. Установит условие `RegistryFetched=True` в статусе
+4. Развернет сервер с полученными параметрами
+
 ### Проверка статуса
 
 Посмотрите статус развернутых MCP серверов:
@@ -161,6 +262,18 @@ filesystem-server   mcp-server-filesystem    latest   1          1       Running
 Детальная информация:
 ```bash
 kubectl describe mcpserver filesystem-server
+```
+
+Проверка статуса загрузки из реестра:
+```bash
+# Проверка статуса загрузки из реестра
+kubectl get mcpserver filesystem-server -o jsonpath='{.status.conditions[?(@.type=="RegistryFetched")].status}'
+
+# Просмотр сообщения о статусе реестра
+kubectl get mcpserver filesystem-server -o jsonpath='{.status.conditions[?(@.type=="RegistryFetched")].message}'
+
+# Просмотр всех условий статуса
+kubectl get mcpserver filesystem-server -o jsonpath='{.status.conditions[*].type}'
 ```
 
 ## Конфигурация MCPServer
