@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
-	"github.com/FantasyNitroGEN/mcp_operator/internal/controller"
+	controllers "github.com/FantasyNitroGEN/mcp_operator/controllers"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
 	//+kubebuilder:scaffold:imports
 )
@@ -120,7 +120,7 @@ func main() {
 		registryClient = registry.NewClient()
 	}
 
-	if err = (&controller.MCPServerReconciler{
+	if err = (&controllers.MCPServerReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		RegistryClient: registryClient,
