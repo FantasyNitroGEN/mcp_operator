@@ -338,28 +338,28 @@ func (v *DefaultValidationService) validateTenantResourceQuotas(quotas mcpv1.Ten
 	// Validate Memory quota
 	if quotas.Memory != nil {
 		if quotas.Memory.IsZero() || quotas.Memory.Sign() < 0 {
-			return fmt.Errorf("Memory quota must be positive")
+			return fmt.Errorf("memory quota must be positive")
 		}
 	}
 
 	// Validate Storage quota
 	if quotas.Storage != nil {
 		if quotas.Storage.IsZero() || quotas.Storage.Sign() < 0 {
-			return fmt.Errorf("Storage quota must be positive")
+			return fmt.Errorf("storage quota must be positive")
 		}
 	}
 
 	// Validate Pods quota
 	if quotas.Pods != nil {
 		if *quotas.Pods <= 0 {
-			return fmt.Errorf("Pods quota must be positive")
+			return fmt.Errorf("pods quota must be positive")
 		}
 	}
 
 	// Validate Services quota
 	if quotas.Services != nil {
 		if *quotas.Services <= 0 {
-			return fmt.Errorf("Services quota must be positive")
+			return fmt.Errorf("services quota must be positive")
 		}
 	}
 
@@ -380,7 +380,7 @@ func (v *DefaultValidationService) validateTenantResourceQuotas(quotas mcpv1.Ten
 	// Validate Secrets quota
 	if quotas.Secrets != nil {
 		if *quotas.Secrets <= 0 {
-			return fmt.Errorf("Secrets quota must be positive")
+			return fmt.Errorf("secrets quota must be positive")
 		}
 	}
 

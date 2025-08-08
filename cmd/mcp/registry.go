@@ -144,17 +144,27 @@ func runRegistrySearch(query string, timeout time.Duration, format string) error
 
 func printServersTable(servers []registry.MCPServerInfo) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	defer w.Flush()
+	defer func() {
+		if err := w.Flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error flushing output: %v\n", err)
+		}
+	}()
 
-	fmt.Fprintln(w, "NAME\tUPDATED\tSIZE")
-	fmt.Fprintln(w, "----\t-------\t----")
+	if _, err := fmt.Fprintln(w, "NAME\tUPDATED\tSIZE"); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+	if _, err := fmt.Fprintln(w, "----\t-------\t----"); err != nil {
+		return fmt.Errorf("failed to write separator: %w", err)
+	}
 
 	for _, server := range servers {
-		fmt.Fprintf(w, "%s\t%s\t%d bytes\n",
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%d bytes\n",
 			server.Name,
 			server.UpdatedAt.Format("2006-01-02 15:04:05"),
 			server.Size,
-		)
+		); err != nil {
+			return fmt.Errorf("failed to write server info: %w", err)
+		}
 	}
 
 	return nil
@@ -168,6 +178,10 @@ func printServersJSON(servers []registry.MCPServerInfo) error {
 
 func printServersYAML(servers []registry.MCPServerInfo) error {
 	encoder := yaml.NewEncoder(os.Stdout)
-	defer encoder.Close()
+	defer func() {
+		if err := encoder.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing YAML encoder: %v\n", err)
+		}
+	}()
 	return encoder.Encode(servers)
 }

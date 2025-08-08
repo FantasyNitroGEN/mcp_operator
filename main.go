@@ -233,22 +233,19 @@ func main() {
 		ticker := time.NewTicker(30 * time.Minute) // Clean cache every 30 minutes
 		defer ticker.Stop()
 
-		for {
-			select {
-			case <-ticker.C:
-				cacheService.ClearExpired(context.Background())
-				stats := cacheService.GetStats(context.Background())
-				setupLog.V(1).Info("Cache statistics",
-					"totalEntries", stats.TotalEntries,
-					"expiredEntries", stats.ExpiredEntries,
-					"registryHits", stats.RegistryHits,
-					"registryMisses", stats.RegistryMisses,
-					"mcpServerHits", stats.MCPServerHits,
-					"mcpServerMisses", stats.MCPServerMisses,
-					"registryServersHits", stats.RegistryServersHits,
-					"registryServersMisses", stats.RegistryServersMisses,
-				)
-			}
+		for range ticker.C {
+			cacheService.ClearExpired(context.Background())
+			stats := cacheService.GetStats(context.Background())
+			setupLog.V(1).Info("Cache statistics",
+				"totalEntries", stats.TotalEntries,
+				"expiredEntries", stats.ExpiredEntries,
+				"registryHits", stats.RegistryHits,
+				"registryMisses", stats.RegistryMisses,
+				"mcpServerHits", stats.MCPServerHits,
+				"mcpServerMisses", stats.MCPServerMisses,
+				"registryServersHits", stats.RegistryServersHits,
+				"registryServersMisses", stats.RegistryServersMisses,
+			)
 		}
 	}()
 
