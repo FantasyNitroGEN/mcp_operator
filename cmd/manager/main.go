@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -19,6 +20,7 @@ import (
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/controllers"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/retry"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/services"
 	mcpwebhook "github.com/FantasyNitroGEN/mcp_operator/pkg/webhook"
 	//+kubebuilder:scaffold:imports
@@ -41,6 +43,18 @@ func main() {
 	var probeAddr string
 	var webhookPort int
 	var enableWebhooks bool
+
+	// GitHub retry configuration flags
+	var githubMaxRetries int
+	var githubInitialDelay time.Duration
+	var githubMaxDelay time.Duration
+	var githubRateLimitMaxRetries int
+	var githubRateLimitBaseDelay time.Duration
+	var githubRateLimitMaxDelay time.Duration
+	var githubNetworkMaxRetries int
+	var githubNetworkBaseDelay time.Duration
+	var githubNetworkMaxDelay time.Duration
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.IntVar(&webhookPort, "webhook-port", 9443, "The port the webhook server binds to.")
@@ -48,6 +62,17 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+
+	// GitHub retry configuration flags
+	flag.IntVar(&githubMaxRetries, "github-max-retries", 5, "Maximum number of retries for general GitHub API errors.")
+	flag.DurationVar(&githubInitialDelay, "github-initial-delay", time.Second, "Initial delay before first retry for GitHub API calls.")
+	flag.DurationVar(&githubMaxDelay, "github-max-delay", time.Minute*5, "Maximum delay between retries for GitHub API calls.")
+	flag.IntVar(&githubRateLimitMaxRetries, "github-rate-limit-max-retries", 3, "Maximum number of retries for GitHub API rate limit errors.")
+	flag.DurationVar(&githubRateLimitBaseDelay, "github-rate-limit-base-delay", time.Minute*15, "Base delay for GitHub API rate limit retries.")
+	flag.DurationVar(&githubRateLimitMaxDelay, "github-rate-limit-max-delay", time.Hour, "Maximum delay for GitHub API rate limit retries.")
+	flag.IntVar(&githubNetworkMaxRetries, "github-network-max-retries", 5, "Maximum number of retries for GitHub API network errors.")
+	flag.DurationVar(&githubNetworkBaseDelay, "github-network-base-delay", time.Second*2, "Base delay for GitHub API network error retries.")
+	flag.DurationVar(&githubNetworkMaxDelay, "github-network-max-delay", time.Minute*2, "Maximum delay for GitHub API network error retries.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -83,7 +108,33 @@ func main() {
 	// Create service instances with proper dependencies
 	kubernetesClient := services.NewDefaultKubernetesClientService(mgr.GetClient())
 	resourceBuilder := services.NewDefaultResourceBuilderService()
-	registryService := services.NewDefaultRegistryService()
+
+	// Create GitHub retry configuration from command line flags
+	githubRetryConfig := retry.GitHubRetryConfig{
+		MaxRetries:   githubMaxRetries,
+		InitialDelay: githubInitialDelay,
+		MaxDelay:     githubMaxDelay,
+		Multiplier:   2.0,
+		Jitter:       true,
+
+		RateLimitMaxRetries: githubRateLimitMaxRetries,
+		RateLimitBaseDelay:  githubRateLimitBaseDelay,
+		RateLimitMaxDelay:   githubRateLimitMaxDelay,
+
+		NetworkMaxRetries: githubNetworkMaxRetries,
+		NetworkBaseDelay:  githubNetworkBaseDelay,
+		NetworkMaxDelay:   githubNetworkMaxDelay,
+
+		OnRetry: func(attempt int, err error, errorType retry.GitHubErrorType, delay time.Duration) {
+			setupLog.Info("GitHub API retry attempt",
+				"attempt", attempt,
+				"errorType", errorType.String(),
+				"delay", delay,
+				"error", err.Error())
+		},
+	}
+
+	registryService := services.NewDefaultRegistryServiceWithRetryConfig(githubRetryConfig)
 	statusService := services.NewDefaultStatusService(kubernetesClient)
 	validationService := services.NewDefaultValidationService(kubernetesClient)
 	retryService := services.NewDefaultRetryService()

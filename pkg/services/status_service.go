@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"time"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -271,4 +272,69 @@ func (s *DefaultStatusService) ClearMCPServerConditions(mcpServer *mcpv1.MCPServ
 // ClearMCPRegistryConditions clears all conditions from MCPRegistry
 func (s *DefaultStatusService) ClearMCPRegistryConditions(registry *mcpv1.MCPRegistry) {
 	registry.Status.Conditions = []mcpv1.MCPRegistryCondition{}
+}
+
+// CheckDeploymentTimeout checks if an MCPServer has been stuck in Pending/Progressing state
+// for longer than the specified timeout duration. Returns true if timeout exceeded.
+func (s *DefaultStatusService) CheckDeploymentTimeout(mcpServer *mcpv1.MCPServer, timeout time.Duration) bool {
+	logger := log.FromContext(context.Background()).WithValues("mcpserver", mcpServer.Name)
+
+	// Only check timeout for servers in Pending phase
+	if mcpServer.Status.Phase != mcpv1.MCPServerPhasePending {
+		return false
+	}
+
+	// Get the Progressing condition to check when deployment started
+	progressingCondition := s.GetMCPServerCondition(mcpServer, mcpv1.MCPServerConditionProgressing)
+	if progressingCondition == nil {
+		logger.V(1).Info("No Progressing condition found, skipping timeout check")
+		return false
+	}
+
+	// Only check timeout if the condition is True (deployment is progressing)
+	if progressingCondition.Status != metav1.ConditionTrue {
+		return false
+	}
+
+	// Calculate how long the deployment has been progressing
+	now := time.Now()
+	progressingDuration := now.Sub(progressingCondition.LastTransitionTime.Time)
+
+	logger.V(1).Info("Checking deployment timeout",
+		"progressingDuration", progressingDuration,
+		"timeout", timeout,
+		"lastTransitionTime", progressingCondition.LastTransitionTime.Time,
+	)
+
+	// Return true if timeout exceeded
+	if progressingDuration > timeout {
+		logger.Info("Deployment timeout detected",
+			"progressingDuration", progressingDuration,
+			"timeout", timeout,
+			"reason", progressingCondition.Reason,
+		)
+		return true
+	}
+
+	return false
+}
+
+// MarkDeploymentAsTimedOut marks an MCPServer as failed due to deployment timeout
+func (s *DefaultStatusService) MarkDeploymentAsTimedOut(mcpServer *mcpv1.MCPServer, timeout time.Duration) {
+	logger := log.FromContext(context.Background()).WithValues("mcpserver", mcpServer.Name)
+	logger.Info("Marking MCPServer as failed due to deployment timeout", "timeout", timeout)
+
+	// Set phase to Failed
+	s.SetMCPServerPhase(mcpServer, mcpv1.MCPServerPhaseFailed,
+		fmt.Sprintf("Deployment timeout exceeded (%v)", timeout), "DeploymentTimeout")
+
+	// Set Ready condition to False
+	s.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+		string(metav1.ConditionFalse), "DeploymentTimeout",
+		fmt.Sprintf("Deployment has been stuck for %v, exceeding timeout of %v", timeout, timeout))
+
+	// Set Progressing condition to False
+	s.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
+		string(metav1.ConditionFalse), "DeploymentTimeout",
+		fmt.Sprintf("Deployment timeout exceeded after %v", timeout))
 }

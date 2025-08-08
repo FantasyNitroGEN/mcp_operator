@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"time"
 
@@ -45,6 +48,9 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var registryURL string
+	var maxConcurrentReconcilesMCPServer int
+	var maxConcurrentReconcilesMCPRegistry int
+	var gogcPercent int
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metric endpoint binds to. "+
 		"Use the port :8080. If not set, it will be 0 in order to disable the metrics server")
@@ -58,6 +64,12 @@ func main() {
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&registryURL, "registry-url", "",
 		"URL of the MCP registry (default: Docker MCP Registry on GitHub)")
+	flag.IntVar(&maxConcurrentReconcilesMCPServer, "max-concurrent-reconciles-mcpserver", 5,
+		"Maximum number of concurrent reconciles for MCPServer controller")
+	flag.IntVar(&maxConcurrentReconcilesMCPRegistry, "max-concurrent-reconciles-mcpregistry", 3,
+		"Maximum number of concurrent reconciles for MCPRegistry controller")
+	flag.IntVar(&gogcPercent, "gogc-percent", 100,
+		"GOGC percentage for Go garbage collector (lower values = more frequent GC)")
 
 	opts := zap.Options{
 		Development: true,
@@ -66,6 +78,20 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Configure Go runtime optimizations
+	if gogcPercent != 100 {
+		os.Setenv("GOGC", fmt.Sprintf("%d", gogcPercent))
+		setupLog.Info("GOGC configured", "percentage", gogcPercent)
+	}
+
+	// Start pprof server for profiling (only in development)
+	go func() {
+		setupLog.Info("Starting pprof server on :6060")
+		if err := http.ListenAndServe(":6060", nil); err != nil {
+			setupLog.Error(err, "Failed to start pprof server")
+		}
+	}()
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -186,7 +212,7 @@ func main() {
 	)
 
 	// Setup MCPRegistry Controller with dependency injection
-	setupLog.Info("Setting up MCPRegistry controller")
+	setupLog.Info("Setting up MCPRegistry controller", "maxConcurrentReconciles", maxConcurrentReconcilesMCPRegistry)
 	if err = (&controllers.MCPRegistryReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
@@ -196,13 +222,13 @@ func main() {
 		RetryService:      retryService,
 		EventService:      eventService,
 		CacheService:      cacheService,
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManagerAndConcurrency(mgr, maxConcurrentReconcilesMCPRegistry); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPRegistry")
 		os.Exit(1)
 	}
 
 	// Setup MCPServer Controller with dependency injection
-	setupLog.Info("Setting up MCPServer controller")
+	setupLog.Info("Setting up MCPServer controller", "maxConcurrentReconciles", maxConcurrentReconcilesMCPServer)
 	if err = (&controllers.MCPServerReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
@@ -214,7 +240,7 @@ func main() {
 		EventService:      eventService,
 		AutoUpdateService: autoUpdateService,
 		CacheService:      cacheService,
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManagerAndConcurrency(mgr, maxConcurrentReconcilesMCPServer); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPServer")
 		os.Exit(1)
 	}

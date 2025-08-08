@@ -6,6 +6,7 @@ import (
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/retry"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -19,6 +20,13 @@ type DefaultRegistryService struct {
 func NewDefaultRegistryService() *DefaultRegistryService {
 	return &DefaultRegistryService{
 		registryClient: registry.NewClient(),
+	}
+}
+
+// NewDefaultRegistryServiceWithRetryConfig creates a new DefaultRegistryService with custom GitHub retry configuration
+func NewDefaultRegistryServiceWithRetryConfig(retryConfig retry.GitHubRetryConfig) *DefaultRegistryService {
+	return &DefaultRegistryService{
+		registryClient: registry.NewClientWithRetryConfig(retryConfig),
 	}
 }
 
@@ -108,9 +116,18 @@ func (r *DefaultRegistryService) EnrichMCPServer(ctx context.Context, mcpServer 
 		}
 	}
 
+	// Store template digest in annotations
+	if mcpServer.Annotations == nil {
+		mcpServer.Annotations = make(map[string]string)
+	}
+	if spec.TemplateDigest != "" {
+		mcpServer.Annotations["mcp.allbeone.io/template-digest"] = spec.TemplateDigest
+	}
+
 	logger.Info("Successfully enriched MCPServer with registry data",
 		"version", spec.Version,
-		"image", spec.Runtime.Image)
+		"image", spec.Runtime.Image,
+		"template_digest", spec.TemplateDigest)
 
 	return nil
 }
@@ -153,9 +170,18 @@ func (r *DefaultRegistryService) ForceEnrichMCPServer(ctx context.Context, mcpSe
 		mcpServer.Spec.Runtime.Env[k] = v
 	}
 
+	// Store template digest in annotations
+	if mcpServer.Annotations == nil {
+		mcpServer.Annotations = make(map[string]string)
+	}
+	if spec.TemplateDigest != "" {
+		mcpServer.Annotations["mcp.allbeone.io/template-digest"] = spec.TemplateDigest
+	}
+
 	logger.Info("Successfully force enriched MCPServer with registry data",
 		"version", spec.Version,
-		"image", spec.Runtime.Image)
+		"image", spec.Runtime.Image,
+		"template_digest", spec.TemplateDigest)
 
 	return nil
 }

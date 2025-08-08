@@ -7,6 +7,10 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
+	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -24,6 +28,10 @@ import (
 const (
 	// MCPServerFinalizer is the finalizer used for MCPServer resources
 	MCPServerFinalizer = "mcp.allbeone.io/finalizer"
+
+	// DeploymentTimeout is the maximum time to wait for a deployment to become ready
+	// before marking it as failed (watchdog timeout)
+	DeploymentTimeout = 10 * time.Minute
 )
 
 // MCPServerReconciler reconciles a MCPServer object with decomposed architecture
@@ -53,6 +61,9 @@ type MCPServerReconciler struct {
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=networking.istio.io,resources=virtualservices,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.istio.io,resources=destinationrules,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -139,10 +150,11 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			string(metav1.ConditionFalse), "ValidationFailed", fmt.Sprintf("MCPServer validation failed: %v", err))
 		r.EventService.RecordWarning(mcpServer, "ValidationFailed", fmt.Sprintf("MCPServer validation failed: %v", err))
 
+		// Update status once at the end and return without requeue - validation errors are spec issues
 		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
 			logger.Error(statusErr, "Failed to update MCPServer status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
+		return ctrl.Result{}, nil
 	}
 
 	// Validate tenant resource quotas if multi-tenancy is enabled
@@ -153,10 +165,11 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				string(metav1.ConditionFalse), "TenantValidationFailed", fmt.Sprintf("Tenant validation failed: %v", err))
 			r.EventService.RecordWarning(mcpServer, "TenantValidationFailed", fmt.Sprintf("Tenant validation failed: %v", err))
 
+			// Update status once and return without requeue - tenant validation errors are spec issues
 			if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
 				logger.Error(statusErr, "Failed to update MCPServer status")
 			}
-			return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
+			return ctrl.Result{}, nil
 		}
 	}
 
@@ -182,10 +195,11 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				string(metav1.ConditionFalse), "RegistryEnrichmentFailed", fmt.Sprintf("Failed to enrich from registry: %v", err))
 			r.EventService.RecordWarning(mcpServer, "RegistryEnrichmentFailed", fmt.Sprintf("Failed to enrich from registry: %v", err))
 
+			// Update status once and return without requeue - registry errors will be retried on next event
 			if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
 				logger.Error(statusErr, "Failed to update MCPServer status")
 			}
-			return ctrl.Result{RequeueAfter: time.Minute * 2}, nil
+			return ctrl.Result{}, nil
 		}
 
 		logger.Info("Successfully enriched server from registry",
@@ -232,10 +246,11 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			string(metav1.ConditionFalse), "DeploymentFailed", fmt.Sprintf("Failed to create deployment: %v", err))
 		r.EventService.RecordWarning(mcpServer, "DeploymentFailed", fmt.Sprintf("Failed to create deployment: %v", err))
 
+		// Update status once and return without requeue - deployment errors will be retried on next event
 		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
 			logger.Error(statusErr, "Failed to update MCPServer status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute * 2}, nil
+		return ctrl.Result{}, nil
 	}
 
 	// Create or update service with retry
@@ -248,10 +263,50 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			string(metav1.ConditionFalse), "ServiceFailed", fmt.Sprintf("Failed to create service: %v", err))
 		r.EventService.RecordWarning(mcpServer, "ServiceFailed", fmt.Sprintf("Failed to create service: %v", err))
 
+		// Update status once and return without requeue - service errors will be retried on next event
 		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
 			logger.Error(statusErr, "Failed to update MCPServer status")
 		}
-		return ctrl.Result{RequeueAfter: time.Minute * 2}, nil
+		return ctrl.Result{}, nil
+	}
+
+	// Create or update Istio resources if enabled
+	if mcpServer.Spec.Istio != nil && mcpServer.Spec.Istio.Enabled {
+		logger.Info("Creating or updating Istio resources")
+
+		// Create or update VirtualService if configured
+		if mcpServer.Spec.Istio.VirtualService != nil {
+			if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
+				_, err := r.DeploymentService.CreateOrUpdateVirtualService(ctx, mcpServer)
+				return err
+			}); err != nil {
+				logger.Error(err, "Failed to create or update VirtualService")
+				r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+					string(metav1.ConditionFalse), "VirtualServiceFailed", fmt.Sprintf("Failed to create VirtualService: %v", err))
+				r.EventService.RecordWarning(mcpServer, "VirtualServiceFailed", fmt.Sprintf("Failed to create VirtualService: %v", err))
+				// Don't fail the entire reconciliation for VirtualService issues
+			} else {
+				logger.Info("Successfully created or updated VirtualService")
+				r.EventService.RecordNormal(mcpServer, "VirtualServiceReady", "VirtualService created or updated successfully")
+			}
+		}
+
+		// Create or update DestinationRule if configured
+		if mcpServer.Spec.Istio.DestinationRule != nil {
+			if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
+				_, err := r.DeploymentService.CreateOrUpdateDestinationRule(ctx, mcpServer)
+				return err
+			}); err != nil {
+				logger.Error(err, "Failed to create or update DestinationRule")
+				r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+					string(metav1.ConditionFalse), "DestinationRuleFailed", fmt.Sprintf("Failed to create DestinationRule: %v", err))
+				r.EventService.RecordWarning(mcpServer, "DestinationRuleFailed", fmt.Sprintf("Failed to create DestinationRule: %v", err))
+				// Don't fail the entire reconciliation for DestinationRule issues
+			} else {
+				logger.Info("Successfully created or updated DestinationRule")
+				r.EventService.RecordNormal(mcpServer, "DestinationRuleReady", "DestinationRule created or updated successfully")
+			}
+		}
 	}
 
 	// Create or update HPA if autoscaling is enabled
@@ -290,31 +345,93 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// Update MCPServer status based on deployment status
-	if err := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); err != nil {
-		logger.Error(err, "Failed to update MCPServer status")
-		return ctrl.Result{}, err
-	}
-
-	// Check deployment status and update conditions
+	// Check deployment status and update conditions with enhanced rolling update tracking
 	deployment, err := r.DeploymentService.GetDeploymentStatus(ctx, mcpServer)
 	if err != nil {
 		logger.Error(err, "Failed to get deployment status")
-		return ctrl.Result{RequeueAfter: time.Second * 30}, nil
+		// Don't requeue - rely on event-driven updates from deployment changes
+		// Set condition to indicate deployment status check failed
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+			string(metav1.ConditionFalse), "DeploymentStatusCheckFailed", fmt.Sprintf("Failed to get deployment status: %v", err))
+	} else {
+		// Update MCPServer status with deployment replica counts
+		mcpServer.Status.Replicas = deployment.Status.Replicas
+		mcpServer.Status.ReadyReplicas = deployment.Status.ReadyReplicas
+		mcpServer.Status.AvailableReplicas = deployment.Status.AvailableReplicas
+
+		// Check if deployment is in rolling update state
+		isRollingUpdate := r.isDeploymentRollingUpdate(deployment)
+		desiredReplicas := int32(1)
+		if deployment.Spec.Replicas != nil {
+			desiredReplicas = *deployment.Spec.Replicas
+		}
+
+		logger.V(1).Info("Deployment status analysis",
+			"desired", desiredReplicas,
+			"replicas", deployment.Status.Replicas,
+			"readyReplicas", deployment.Status.ReadyReplicas,
+			"availableReplicas", deployment.Status.AvailableReplicas,
+			"updatedReplicas", deployment.Status.UpdatedReplicas,
+			"isRollingUpdate", isRollingUpdate,
+		)
+
+		// Update status based on deployment state
+		if isRollingUpdate {
+			// Deployment is in rolling update state
+			mcpServer.Status.Phase = mcpv1.MCPServerPhaseRunning // Keep running during updates
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
+				string(metav1.ConditionTrue), "RollingUpdate", "MCPServer deployment is performing rolling update")
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+				string(metav1.ConditionFalse), "RollingUpdate", "MCPServer deployment is updating")
+			r.EventService.RecordNormal(mcpServer, "RollingUpdate", "MCPServer deployment is performing rolling update")
+		} else if deployment.Status.ReadyReplicas == desiredReplicas && deployment.Status.ReadyReplicas > 0 {
+			// All replicas are ready and deployment is stable
+			mcpServer.Status.Phase = mcpv1.MCPServerPhaseRunning
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+				string(metav1.ConditionTrue), "DeploymentReady", "MCPServer deployment is ready")
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
+				string(metav1.ConditionFalse), "DeploymentComplete", "MCPServer deployment completed successfully")
+			r.EventService.RecordNormal(mcpServer, "DeploymentReady", "MCPServer deployment is ready and running")
+		} else if deployment.Status.Replicas == 0 {
+			// No replicas yet - deployment is scaling up
+			mcpServer.Status.Phase = mcpv1.MCPServerPhasePending
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
+				string(metav1.ConditionTrue), "DeploymentScaling", "Waiting for deployment to scale up")
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+				string(metav1.ConditionFalse), "DeploymentScaling", "Deployment is scaling up")
+		} else if deployment.Status.ReadyReplicas > 0 && deployment.Status.ReadyReplicas < desiredReplicas {
+			// Some replicas are ready but not all - could be scaling or recovering
+			mcpServer.Status.Phase = mcpv1.MCPServerPhaseRunning
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
+				string(metav1.ConditionTrue), "DeploymentPartiallyReady", fmt.Sprintf("Deployment has %d/%d ready replicas", deployment.Status.ReadyReplicas, desiredReplicas))
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+				string(metav1.ConditionFalse), "DeploymentPartiallyReady", fmt.Sprintf("Only %d/%d replicas are ready", deployment.Status.ReadyReplicas, desiredReplicas))
+		} else {
+			// Fallback case - deployment exists but status is unclear
+			mcpServer.Status.Phase = mcpv1.MCPServerPhasePending
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
+				string(metav1.ConditionTrue), "DeploymentPending", "Deployment status is pending")
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+				string(metav1.ConditionFalse), "DeploymentPending", "Deployment is not ready yet")
+		}
 	}
 
-	// Update status based on deployment readiness
-	if deployment.Status.ReadyReplicas > 0 {
-		mcpServer.Status.Phase = mcpv1.MCPServerPhaseRunning
-		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
-			string(metav1.ConditionTrue), "DeploymentReady", "MCPServer deployment is ready")
-		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
-			string(metav1.ConditionFalse), "DeploymentComplete", "MCPServer deployment completed successfully")
-		r.EventService.RecordNormal(mcpServer, "DeploymentReady", "MCPServer deployment is ready and running")
-	} else if deployment.Status.Replicas == 0 {
-		mcpServer.Status.Phase = mcpv1.MCPServerPhasePending
-		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
-			string(metav1.ConditionTrue), "DeploymentScaling", "Waiting for deployment to scale up")
+	// Watchdog: Check for deployment timeout
+	if r.StatusService.CheckDeploymentTimeout(mcpServer, DeploymentTimeout) {
+		logger.Info("Deployment timeout detected, marking MCPServer as failed",
+			"timeout", DeploymentTimeout,
+			"phase", mcpServer.Status.Phase,
+		)
+
+		// Mark as timed out
+		r.StatusService.MarkDeploymentAsTimedOut(mcpServer, DeploymentTimeout)
+
+		// Record warning event
+		r.EventService.RecordWarning(mcpServer, "DeploymentTimeout",
+			fmt.Sprintf("Deployment has been stuck for %v, exceeding timeout", DeploymentTimeout))
+
+		// Update metrics for failed reconciliation
+		metrics.RecordReconcileError(req.Namespace, "deployment_timeout", time.Since(startTime).Seconds())
 	}
 
 	// Final status update
@@ -332,8 +449,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Record successful reconciliation
 	metrics.RecordReconcileSuccess(req.Namespace, time.Since(startTime).Seconds(), string(mcpServer.Status.Phase))
 
-	// Requeue after a reasonable interval to check status
-	return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
+	// No requeue needed - rely on event-driven updates from owned resources
+	return ctrl.Result{}, nil
 }
 
 // handleDeletion handles the deletion of MCPServer
@@ -360,7 +477,8 @@ func (r *MCPServerReconciler) handleDeletion(ctx context.Context, logger logr.Lo
 	if err := r.DeploymentService.DeleteResources(ctx, mcpServer); err != nil {
 		logger.Error(err, "Failed to delete MCPServer resources")
 		r.EventService.RecordWarning(mcpServer, "DeletionFailed", fmt.Sprintf("Failed to delete resources: %v", err))
-		return ctrl.Result{RequeueAfter: time.Second * 30}, nil
+		// Don't requeue - rely on event-driven updates from owned resource deletions
+		return ctrl.Result{}, err
 	}
 
 	// Remove finalizer to allow deletion
@@ -378,10 +496,19 @@ func (r *MCPServerReconciler) handleDeletion(ctx context.Context, logger logr.Lo
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MCPServerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return r.SetupWithManagerAndConcurrency(mgr, 5)
+}
+
+// SetupWithManagerAndConcurrency sets up the controller with the Manager and configurable concurrency.
+func (r *MCPServerReconciler) SetupWithManagerAndConcurrency(mgr ctrl.Manager, maxConcurrentReconciles int) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mcpv1.MCPServer{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
+		Owns(&networkingv1.NetworkPolicy{}).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 5, // Higher concurrency for deployment operations
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(r)
 }
@@ -466,4 +593,56 @@ func (r *MCPServerReconciler) ListMCPServersEfficient(ctx context.Context, names
 	}
 
 	return mcpServerList, nil
+}
+
+// isDeploymentRollingUpdate determines if a deployment is currently performing a rolling update
+func (r *MCPServerReconciler) isDeploymentRollingUpdate(deployment *appsv1.Deployment) bool {
+	if deployment == nil {
+		return false
+	}
+
+	desiredReplicas := int32(1)
+	if deployment.Spec.Replicas != nil {
+		desiredReplicas = *deployment.Spec.Replicas
+	}
+
+	// Check deployment conditions for rolling update indicators
+	for _, condition := range deployment.Status.Conditions {
+		if condition.Type == appsv1.DeploymentProgressing {
+			// If deployment is progressing and reason indicates rolling update
+			if condition.Status == corev1.ConditionTrue &&
+				(condition.Reason == "ReplicaSetUpdated" || condition.Reason == "NewReplicaSetCreated") {
+				return true
+			}
+		}
+	}
+
+	// Check replica counts to detect rolling update state
+	// During rolling update, we might have:
+	// - UpdatedReplicas < DesiredReplicas (old pods still exist)
+	// - Replicas > DesiredReplicas (temporary surge during update)
+	// - ReadyReplicas != UpdatedReplicas (some old pods still ready)
+
+	// If we have more replicas than desired, we're likely in surge phase
+	if deployment.Status.Replicas > desiredReplicas {
+		return true
+	}
+
+	// If updated replicas is less than desired, update is in progress
+	if deployment.Status.UpdatedReplicas < desiredReplicas && deployment.Status.UpdatedReplicas > 0 {
+		return true
+	}
+
+	// If we have both old and new replicas (total replicas > ready replicas and updated replicas > 0)
+	if deployment.Status.Replicas > deployment.Status.ReadyReplicas && deployment.Status.UpdatedReplicas > 0 {
+		return true
+	}
+
+	// Check if deployment generation is newer than observed generation
+	// This indicates a spec change that hasn't been fully processed yet
+	if deployment.Generation > deployment.Status.ObservedGeneration {
+		return true
+	}
+
+	return false
 }

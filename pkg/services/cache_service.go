@@ -84,14 +84,7 @@ func (c *DefaultCacheService) GetRegistry(ctx context.Context, key string) (*mcp
 	entry, exists := c.registryCache[key]
 	if !exists || entry.IsExpired() {
 		c.stats.RegistryMisses++
-		if exists && entry.IsExpired() {
-			// Clean up expired entry
-			go func() {
-				c.mutex.Lock()
-				delete(c.registryCache, key)
-				c.mutex.Unlock()
-			}()
-		}
+		// Note: Expired entries are cleaned up by periodic ClearExpired() to avoid goroutine leaks
 		return nil, false
 	}
 
@@ -133,14 +126,7 @@ func (c *DefaultCacheService) GetMCPServer(ctx context.Context, key string) (*mc
 	entry, exists := c.mcpServerCache[key]
 	if !exists || entry.IsExpired() {
 		c.stats.MCPServerMisses++
-		if exists && entry.IsExpired() {
-			// Clean up expired entry
-			go func() {
-				c.mutex.Lock()
-				delete(c.mcpServerCache, key)
-				c.mutex.Unlock()
-			}()
-		}
+		// Note: Expired entries are cleaned up by periodic ClearExpired() to avoid goroutine leaks
 		return nil, false
 	}
 
@@ -182,14 +168,7 @@ func (c *DefaultCacheService) GetRegistryServers(ctx context.Context, registryNa
 	entry, exists := c.registryServersCache[registryName]
 	if !exists || entry.IsExpired() {
 		c.stats.RegistryServersMisses++
-		if exists && entry.IsExpired() {
-			// Clean up expired entry
-			go func() {
-				c.mutex.Lock()
-				delete(c.registryServersCache, registryName)
-				c.mutex.Unlock()
-			}()
-		}
+		// Note: Expired entries are cleaned up by periodic ClearExpired() to avoid goroutine leaks
 		return nil, false
 	}
 

@@ -253,6 +253,20 @@ func (s *DefaultAutoUpdateService) IsUpdateRequired(ctx context.Context, mcpServ
 		return false, nil, fmt.Errorf("failed to fetch latest server specification: %w", err)
 	}
 
+	// Compare template digests first - this catches any template changes
+	currentDigest := ""
+	if mcpServer.Annotations != nil {
+		currentDigest = mcpServer.Annotations["mcp.allbeone.io/template-digest"]
+	}
+
+	if currentDigest != "" && latestSpec.TemplateDigest != "" && currentDigest != latestSpec.TemplateDigest {
+		logger.Info("Template digest mismatch detected",
+			"current_digest", currentDigest,
+			"latest_digest", latestSpec.TemplateDigest,
+		)
+		return true, latestSpec, nil
+	}
+
 	// Compare versions
 	if mcpServer.Spec.Registry.Version != latestSpec.Version {
 		logger.Info("Version mismatch detected",
@@ -343,6 +357,14 @@ func (s *DefaultAutoUpdateService) applyTemplateUpdates(mcpServer *mcpv1.MCPServ
 	}
 	for k, v := range latestSpec.Runtime.Env {
 		mcpServer.Spec.Runtime.Env[k] = v
+	}
+
+	// Update template digest annotation
+	if mcpServer.Annotations == nil {
+		mcpServer.Annotations = make(map[string]string)
+	}
+	if latestSpec.TemplateDigest != "" {
+		mcpServer.Annotations["mcp.allbeone.io/template-digest"] = latestSpec.TemplateDigest
 	}
 }
 

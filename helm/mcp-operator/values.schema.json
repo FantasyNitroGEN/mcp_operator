@@ -1,0 +1,651 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "MCP Operator Helm Chart Values Schema",
+  "description": "JSON Schema for validating MCP Operator Helm chart values",
+  "properties": {
+    "operator": {
+      "type": "object",
+      "description": "Operator configuration",
+      "properties": {
+        "image": {
+          "type": "object",
+          "description": "Image configuration",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "description": "Container image repository",
+              "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+            },
+            "pullPolicy": {
+              "type": "string",
+              "description": "Image pull policy",
+              "enum": ["Always", "IfNotPresent", "Never"]
+            },
+            "tag": {
+              "type": "string",
+              "description": "Image tag"
+            },
+            "digest": {
+              "type": "string",
+              "description": "Image digest (takes precedence over tag)",
+              "pattern": "^(|sha256:[a-f0-9]{64})$"
+            }
+          },
+          "required": ["repository", "pullPolicy"],
+          "additionalProperties": false
+        },
+        "imagePullSecrets": {
+          "type": "array",
+          "description": "Image pull secrets",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": ["name"],
+            "additionalProperties": false
+          }
+        },
+        "serviceAccount": {
+          "type": "object",
+          "description": "Service account configuration",
+          "properties": {
+            "create": {
+              "type": "boolean",
+              "description": "Specifies whether a service account should be created"
+            },
+            "annotations": {
+              "type": "object",
+              "description": "Annotations to add to the service account",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "name": {
+              "type": "string",
+              "description": "The name of the service account to use"
+            },
+            "automountServiceAccountToken": {
+              "type": "boolean",
+              "description": "Automatically mount service account token"
+            }
+          },
+          "additionalProperties": false
+        },
+        "podAnnotations": {
+          "type": "object",
+          "description": "Pod annotations",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "podSecurityContext": {
+          "type": "object",
+          "description": "Pod security context",
+          "properties": {
+            "runAsNonRoot": {
+              "type": "boolean"
+            },
+            "runAsUser": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "runAsGroup": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "fsGroup": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "seccompProfile": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["RuntimeDefault", "Localhost", "Unconfined"]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "securityContext": {
+          "type": "object",
+          "description": "Container security context",
+          "properties": {
+            "allowPrivilegeEscalation": {
+              "type": "boolean"
+            },
+            "readOnlyRootFilesystem": {
+              "type": "boolean"
+            },
+            "runAsNonRoot": {
+              "type": "boolean"
+            },
+            "runAsUser": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "capabilities": {
+              "type": "object",
+              "properties": {
+                "drop": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "add": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "resources": {
+          "type": "object",
+          "description": "Resource requirements",
+          "properties": {
+            "limits": {
+              "type": "object",
+              "properties": {
+                "cpu": {
+                  "type": "string",
+                  "pattern": "^[0-9]+m?$|^[0-9]*\\.?[0-9]+$"
+                },
+                "memory": {
+                  "type": "string",
+                  "pattern": "^[0-9]+[KMGT]?i?$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "requests": {
+              "type": "object",
+              "properties": {
+                "cpu": {
+                  "type": "string",
+                  "pattern": "^[0-9]+m?$|^[0-9]*\\.?[0-9]+$"
+                },
+                "memory": {
+                  "type": "string",
+                  "pattern": "^[0-9]+[KMGT]?i?$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "nodeSelector": {
+          "type": "object",
+          "description": "Node selector",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "tolerations": {
+          "type": "array",
+          "description": "Tolerations",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "operator": {
+                "type": "string",
+                "enum": ["Equal", "Exists"]
+              },
+              "value": {
+                "type": "string"
+              },
+              "effect": {
+                "type": "string",
+                "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"]
+              },
+              "tolerationSeconds": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "affinity": {
+          "type": "object",
+          "description": "Affinity rules"
+        },
+        "replicaCount": {
+          "type": "integer",
+          "description": "Replica count",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "livenessProbe": {
+          "type": "object",
+          "description": "Liveness probe configuration",
+          "properties": {
+            "httpGet": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                }
+              },
+              "required": ["path", "port"],
+              "additionalProperties": false
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "successThreshold": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "readinessProbe": {
+          "type": "object",
+          "description": "Readiness probe configuration",
+          "properties": {
+            "httpGet": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                }
+              },
+              "required": ["path", "port"],
+              "additionalProperties": false
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "successThreshold": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "optimization": {
+          "type": "object",
+          "description": "Resource optimization configuration",
+          "properties": {
+            "maxConcurrentReconcilesMCPServer": {
+              "type": "integer",
+              "description": "Maximum concurrent reconciles for MCPServer controller",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "maxConcurrentReconcilesMCPRegistry": {
+              "type": "integer",
+              "description": "Maximum concurrent reconciles for MCPRegistry controller",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "gogcPercent": {
+              "type": "integer",
+              "description": "GOGC percentage for Go garbage collector",
+              "minimum": 10,
+              "maximum": 1000
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["image"],
+      "additionalProperties": false
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Metrics configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable metrics"
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "namespace": {
+              "type": "string"
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "interval": {
+              "type": "string",
+              "pattern": "^[0-9]+[smh]$"
+            },
+            "scrapeTimeout": {
+              "type": "string",
+              "pattern": "^[0-9]+[smh]$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "webhook": {
+      "type": "object",
+      "description": "Webhook configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable admission webhooks"
+        },
+        "autoDetectCertManager": {
+          "type": "boolean",
+          "description": "Auto-detect cert-manager and disable webhooks if not found"
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          },
+          "additionalProperties": false
+        },
+        "certManager": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "issuerRef": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["Issuer", "ClusterIssuer"]
+                }
+              },
+              "required": ["name", "kind"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "caBundle": {
+          "type": "string",
+          "description": "CA bundle for webhook certificates"
+        },
+        "failurePolicy": {
+          "type": "string",
+          "enum": ["Fail", "Ignore"]
+        },
+        "admissionReviewVersions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["v1", "v1beta1"]
+          }
+        },
+        "sideEffects": {
+          "type": "string",
+          "enum": ["None", "NoneOnDryRun", "Some", "Unknown"]
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        }
+      },
+      "additionalProperties": false
+    },
+    "backup": {
+      "type": "object",
+      "description": "Backup configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable backup functionality"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rbac": {
+      "type": "object",
+      "description": "RBAC configuration",
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Create RBAC resources"
+        },
+        "rules": {
+          "type": "array",
+          "description": "Additional rules for the operator",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "crds": {
+      "type": "object",
+      "description": "Custom Resource Definitions",
+      "properties": {
+        "install": {
+          "type": "boolean",
+          "description": "Install CRDs"
+        },
+        "keep": {
+          "type": "boolean",
+          "description": "Keep CRDs on uninstall"
+        }
+      },
+      "additionalProperties": false
+    },
+    "namespaceOverride": {
+      "type": "string",
+      "description": "Namespace override",
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "commonLabels": {
+      "type": "object",
+      "description": "Common labels",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "commonAnnotations": {
+      "type": "object",
+      "description": "Common annotations",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "priorityClassName": {
+      "type": "string",
+      "description": "Priority class name"
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "description": "Pod disruption budget",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minAvailable": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxUnavailable": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "networkPolicy": {
+      "type": "object",
+      "description": "Network policy",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingress": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "egress": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "extraEnvVars": {
+      "type": "array",
+      "description": "Extra environment variables",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "valueFrom": {
+            "type": "object"
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      }
+    },
+    "extraVolumes": {
+      "type": "array",
+      "description": "Extra volumes",
+      "items": {
+        "type": "object"
+      }
+    },
+    "extraVolumeMounts": {
+      "type": "array",
+      "description": "Extra volume mounts",
+      "items": {
+        "type": "object"
+      }
+    },
+    "initContainers": {
+      "type": "array",
+      "description": "Init containers",
+      "items": {
+        "type": "object"
+      }
+    },
+    "sidecars": {
+      "type": "array",
+      "description": "Sidecar containers",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "required": ["operator"],
+  "additionalProperties": false
+}

@@ -2,7 +2,9 @@ package registry
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FantasyNitroGEN/mcp_operator/pkg/circuitbreaker"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/retry"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,25 +27,21 @@ const (
 
 // Client представляет клиент для работы с Docker MCP Registry
 type Client struct {
-	baseURL        string
-	httpClient     *http.Client
-	userAgent      string
-	githubToken    string
-	circuitBreaker *circuitbreaker.CircuitBreaker
+	baseURL       string
+	httpClient    *http.Client
+	userAgent     string
+	githubToken   string
+	githubRetrier *retry.GitHubRetrier
 }
 
 // NewClient создает новый клиент для работы с реестром
 func NewClient() *Client {
-	// Configure circuit breaker for registry operations
-	cbConfig := circuitbreaker.Config{
-		Name:        "mcp-registry",
-		MaxFailures: 3,
-		Timeout:     60 * time.Second,
-		MaxRequests: 2,
-		OnStateChange: func(name string, from circuitbreaker.State, to circuitbreaker.State) {
-			// Log state changes (could be enhanced with proper logging)
-			fmt.Printf("Circuit breaker %s changed from %s to %s\n", name, from.String(), to.String())
-		},
+	// Configure GitHub retry with default settings
+	retryConfig := retry.DefaultGitHubRetryConfig()
+	retryConfig.OnRetry = func(attempt int, err error, errorType retry.GitHubErrorType, delay time.Duration) {
+		// Enhanced logging for retry attempts
+		fmt.Printf("GitHub API retry attempt %d for error type %s, delay: %v, error: %v\n",
+			attempt, errorType.String(), delay, err)
 	}
 
 	return &Client{
@@ -51,9 +49,9 @@ func NewClient() *Client {
 		httpClient: &http.Client{
 			Timeout: DefaultTimeout,
 		},
-		userAgent:      "mcp-operator/1.0",
-		githubToken:    os.Getenv("GITHUB_TOKEN"),
-		circuitBreaker: circuitbreaker.NewCircuitBreaker(cbConfig),
+		userAgent:     "mcp-operator/1.0",
+		githubToken:   os.Getenv("GITHUB_TOKEN"),
+		githubRetrier: retry.NewGitHubRetrier(retryConfig),
 	}
 }
 
@@ -71,14 +69,27 @@ func NewClientWithToken(token string) *Client {
 	return client
 }
 
+// NewClientWithRetryConfig создает клиент с кастомной конфигурацией повторных попыток
+func NewClientWithRetryConfig(retryConfig retry.GitHubRetryConfig) *Client {
+	return &Client{
+		baseURL: DefaultRegistryURL,
+		httpClient: &http.Client{
+			Timeout: DefaultTimeout,
+		},
+		userAgent:     "mcp-operator/1.0",
+		githubToken:   os.Getenv("GITHUB_TOKEN"),
+		githubRetrier: retry.NewGitHubRetrier(retryConfig),
+	}
+}
+
 // ListServers получает список всех MCP серверов из реестра
 func (c *Client) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
 	var servers []MCPServerInfo
 
-	err := c.circuitBreaker.Call(ctx, func(ctx context.Context) error {
+	err := c.githubRetrier.DoWithGitHubRetry(ctx, "list_servers", func(ctx context.Context) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL, nil)
 		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
+			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
 
 		req.Header.Set("User-Agent", c.userAgent)
@@ -90,19 +101,20 @@ func (c *Client) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return fmt.Errorf("failed to execute request: %w", err)
+			return resp, fmt.Errorf("failed to execute request: %w", err)
 		}
-		defer func() {
-			_ = resp.Body.Close() // Ignore close error
-		}()
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			return resp, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 		}
 
 		var registryResponse []RegistryResponse
 		if err := json.NewDecoder(resp.Body).Decode(&registryResponse); err != nil {
-			return fmt.Errorf("failed to decode response: %w", err)
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				// Log the close error but don't override the original decode error
+				fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+			}
+			return resp, fmt.Errorf("failed to decode response: %w", err)
 		}
 
 		for _, item := range registryResponse {
@@ -117,7 +129,10 @@ func (c *Client) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
 			}
 		}
 
-		return nil
+		if err := resp.Body.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", err)
+		}
+		return resp, nil
 	})
 
 	if err != nil {
@@ -131,13 +146,13 @@ func (c *Client) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
 func (c *Client) GetServerSpec(ctx context.Context, serverName string) (*MCPServerSpec, error) {
 	var spec *MCPServerSpec
 
-	err := c.circuitBreaker.Call(ctx, func(ctx context.Context) error {
+	err := c.githubRetrier.DoWithGitHubRetry(ctx, "get_server_spec", func(ctx context.Context) (*http.Response, error) {
 		// URL для получения server.yaml файла сервера
 		specURL := fmt.Sprintf("%s/%s/server.yaml", c.baseURL, serverName)
 
 		req, err := http.NewRequestWithContext(ctx, "GET", specURL, nil)
 		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
+			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
 
 		req.Header.Set("User-Agent", c.userAgent)
@@ -150,30 +165,37 @@ func (c *Client) GetServerSpec(ctx context.Context, serverName string) (*MCPServ
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return fmt.Errorf("failed to execute request: %w", err)
+			return resp, fmt.Errorf("failed to execute request: %w", err)
 		}
-		defer func() {
-			_ = resp.Body.Close() // Ignore close error
-		}()
 
 		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("server %s not found in registry", serverName)
+			return resp, fmt.Errorf("server %s not found in registry", serverName)
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			return resp, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 		}
 
 		var fileResponse RegistryResponse
 		if err := json.NewDecoder(resp.Body).Decode(&fileResponse); err != nil {
-			return fmt.Errorf("failed to decode response: %w", err)
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+			}
+			return resp, fmt.Errorf("failed to decode response: %w", err)
 		}
 
 		// Декодируем содержимое файла из base64
 		content, err := base64.StdEncoding.DecodeString(fileResponse.Content)
 		if err != nil {
-			return fmt.Errorf("failed to decode file content: %w", err)
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+			}
+			return resp, fmt.Errorf("failed to decode file content: %w", err)
 		}
+
+		// Вычисляем SHA256 digest от raw содержимого server.yaml
+		hash := sha256.Sum256(content)
+		templateDigest := hex.EncodeToString(hash[:])
 
 		// Парсим YAML содержимое
 		var parsedSpec MCPServerSpec
@@ -181,13 +203,31 @@ func (c *Client) GetServerSpec(ctx context.Context, serverName string) (*MCPServ
 			// Если это YAML, попробуем другой подход
 			if strings.Contains(string(content), "name:") {
 				spec, err = c.parseYAMLContent(content)
-				return err
+				if err != nil {
+					if closeErr := resp.Body.Close(); closeErr != nil {
+						fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+					}
+					return resp, err
+				}
+			} else {
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+				}
+				return resp, fmt.Errorf("failed to parse server spec: %w", err)
 			}
-			return fmt.Errorf("failed to parse server spec: %w", err)
+		} else {
+			spec = &parsedSpec
 		}
 
-		spec = &parsedSpec
-		return nil
+		// Устанавливаем digest в спецификацию
+		if spec != nil {
+			spec.TemplateDigest = templateDigest
+		}
+
+		if err := resp.Body.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", err)
+		}
+		return resp, nil
 	})
 
 	if err != nil {

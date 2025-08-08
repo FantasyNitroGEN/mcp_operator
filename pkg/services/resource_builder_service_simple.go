@@ -58,19 +58,14 @@ func (r *SimpleResourceBuilderService) BuildDeployment(mcpServer *mcpv1.MCPServe
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      labels,
+					Annotations: r.buildPodAnnotations(mcpServer),
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{container},
 				},
 			},
-			Strategy: appsv1.DeploymentStrategy{
-				Type: appsv1.RollingUpdateDeploymentStrategyType,
-				RollingUpdate: &appsv1.RollingUpdateDeployment{
-					MaxUnavailable: &intstr.IntOrString{Type: intstr.String, StrVal: "25%"},
-					MaxSurge:       &intstr.IntOrString{Type: intstr.String, StrVal: "25%"},
-				},
-			},
+			Strategy: r.buildDeploymentStrategy(mcpServer),
 		},
 	}
 
@@ -458,4 +453,180 @@ func (r *SimpleResourceBuilderService) buildHPAMetrics(hpaSpec *mcpv1.HPASpec) [
 // isResourceRequirementsEmpty checks if resource requirements are empty
 func (r *SimpleResourceBuilderService) isResourceRequirementsEmpty(resources mcpv1.ResourceRequirements) bool {
 	return len(resources.Limits) == 0 && len(resources.Requests) == 0
+}
+
+// buildDeploymentStrategy builds deployment strategy configuration
+func (r *SimpleResourceBuilderService) buildDeploymentStrategy(mcpServer *mcpv1.MCPServer) appsv1.DeploymentStrategy {
+	// Default strategy for zero-downtime deployments
+	defaultMaxUnavailable := &intstr.IntOrString{Type: intstr.Int, IntVal: 0}
+	defaultMaxSurge := &intstr.IntOrString{Type: intstr.Int, IntVal: 1}
+
+	// If no deployment strategy is specified, use zero-downtime defaults
+	if mcpServer.Spec.DeploymentStrategy == nil {
+		return appsv1.DeploymentStrategy{
+			Type: appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: &appsv1.RollingUpdateDeployment{
+				MaxUnavailable: defaultMaxUnavailable,
+				MaxSurge:       defaultMaxSurge,
+			},
+		}
+	}
+
+	strategy := mcpServer.Spec.DeploymentStrategy
+
+	// Handle Recreate strategy
+	if strategy.Type == "Recreate" {
+		return appsv1.DeploymentStrategy{
+			Type: appsv1.RecreateDeploymentStrategyType,
+		}
+	}
+
+	// Handle RollingUpdate strategy (default)
+	rollingUpdate := &appsv1.RollingUpdateDeployment{
+		MaxUnavailable: defaultMaxUnavailable,
+		MaxSurge:       defaultMaxSurge,
+	}
+
+	// Use custom rolling update parameters if specified
+	if strategy.RollingUpdate != nil {
+		if strategy.RollingUpdate.MaxUnavailable != nil {
+			rollingUpdate.MaxUnavailable = strategy.RollingUpdate.MaxUnavailable
+		}
+		if strategy.RollingUpdate.MaxSurge != nil {
+			rollingUpdate.MaxSurge = strategy.RollingUpdate.MaxSurge
+		}
+	}
+
+	return appsv1.DeploymentStrategy{
+		Type:          appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: rollingUpdate,
+	}
+}
+
+// BuildVirtualService builds Istio VirtualService for MCPServer (simplified version)
+func (r *SimpleResourceBuilderService) BuildVirtualService(mcpServer *mcpv1.MCPServer) *unstructured.Unstructured {
+	logger := log.Log.WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
+	logger.V(1).Info("Building VirtualService (simple)")
+
+	// Check if Istio is enabled and VirtualService is configured
+	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.VirtualService == nil {
+		return nil
+	}
+
+	istioConfig := mcpServer.Spec.Istio
+	vsConfig := istioConfig.VirtualService
+
+	// Set default path if not specified
+	path := vsConfig.Path
+	if path == "" {
+		path = "/"
+	}
+
+	// Set default gateway if not specified
+	gateway := istioConfig.Gateway
+	if gateway == "" {
+		gateway = "default"
+	}
+
+	// Build simplified VirtualService spec
+	spec := map[string]interface{}{
+		"hosts":    []string{vsConfig.Host},
+		"gateways": []string{gateway},
+		"http": []map[string]interface{}{
+			{
+				"match": []map[string]interface{}{
+					{
+						"uri": map[string]interface{}{
+							"prefix": path,
+						},
+					},
+				},
+				"route": []map[string]interface{}{
+					{
+						"destination": map[string]interface{}{
+							"host": fmt.Sprintf("%s.%s.svc.cluster.local", mcpServer.Name, mcpServer.Namespace),
+							"port": map[string]interface{}{
+								"number": mcpServer.Spec.Runtime.Port,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Create VirtualService resource
+	virtualService := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.istio.io/v1beta1",
+			"kind":       "VirtualService",
+			"metadata": map[string]interface{}{
+				"name":      mcpServer.Name,
+				"namespace": mcpServer.Namespace,
+				"labels":    r.buildLabels(mcpServer),
+			},
+			"spec": spec,
+		},
+	}
+
+	return virtualService
+}
+
+// BuildDestinationRule builds Istio DestinationRule for MCPServer (simplified version)
+func (r *SimpleResourceBuilderService) BuildDestinationRule(mcpServer *mcpv1.MCPServer) *unstructured.Unstructured {
+	logger := log.Log.WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
+	logger.V(1).Info("Building DestinationRule (simple)")
+
+	// Check if Istio is enabled and DestinationRule is configured
+	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.DestinationRule == nil {
+		return nil
+	}
+
+	// Build simplified DestinationRule spec with basic mTLS
+	spec := map[string]interface{}{
+		"host": fmt.Sprintf("%s.%s.svc.cluster.local", mcpServer.Name, mcpServer.Namespace),
+		"trafficPolicy": map[string]interface{}{
+			"tls": map[string]interface{}{
+				"mode": "ISTIO_MUTUAL",
+			},
+		},
+	}
+
+	// Create DestinationRule resource
+	destinationRule := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.istio.io/v1beta1",
+			"kind":       "DestinationRule",
+			"metadata": map[string]interface{}{
+				"name":      mcpServer.Name,
+				"namespace": mcpServer.Namespace,
+				"labels":    r.buildLabels(mcpServer),
+			},
+			"spec": spec,
+		},
+	}
+
+	return destinationRule
+}
+
+// buildPodAnnotations builds annotations for pod template
+func (r *SimpleResourceBuilderService) buildPodAnnotations(mcpServer *mcpv1.MCPServer) map[string]string {
+	annotations := make(map[string]string)
+
+	// Add Istio sidecar injection annotation if enabled
+	if mcpServer.Spec.Istio != nil && mcpServer.Spec.Istio.Enabled {
+		// Check if sidecar injection is explicitly configured
+		if mcpServer.Spec.Istio.SidecarInject != nil {
+			if *mcpServer.Spec.Istio.SidecarInject {
+				annotations["sidecar.istio.io/inject"] = "true"
+			} else {
+				annotations["sidecar.istio.io/inject"] = "false"
+			}
+		} else {
+			// Default to true if Istio is enabled but sidecar injection is not explicitly set
+			annotations["sidecar.istio.io/inject"] = "true"
+		}
+	}
+
+	return annotations
 }

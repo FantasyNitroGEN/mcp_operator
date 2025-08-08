@@ -57,6 +57,18 @@ type DeploymentService interface {
 
 	// GetDeploymentStatus gets the current status of deployment
 	GetDeploymentStatus(ctx context.Context, mcpServer *mcpv1.MCPServer) (*appsv1.Deployment, error)
+
+	// CreateOrUpdateVirtualService creates or updates Istio VirtualService
+	CreateOrUpdateVirtualService(ctx context.Context, mcpServer *mcpv1.MCPServer) (*unstructured.Unstructured, error)
+
+	// CreateOrUpdateDestinationRule creates or updates Istio DestinationRule
+	CreateOrUpdateDestinationRule(ctx context.Context, mcpServer *mcpv1.MCPServer) (*unstructured.Unstructured, error)
+
+	// DeleteIstioResources deletes Istio resources associated with MCPServer
+	DeleteIstioResources(ctx context.Context, mcpServer *mcpv1.MCPServer) error
+
+	// IsIstioAvailable checks if Istio CRDs are available in the cluster
+	IsIstioAvailable(ctx context.Context) (bool, error)
 }
 
 // StatusService defines the interface for status management operations
@@ -72,6 +84,13 @@ type StatusService interface {
 
 	// SetRegistryCondition sets a condition on MCPRegistry
 	SetRegistryCondition(registry *mcpv1.MCPRegistry, conditionType mcpv1.MCPRegistryConditionType, status string, reason, message string)
+
+	// CheckDeploymentTimeout checks if an MCPServer has been stuck in Pending/Progressing state
+	// for longer than the specified timeout duration. Returns true if timeout exceeded.
+	CheckDeploymentTimeout(mcpServer *mcpv1.MCPServer, timeout time.Duration) bool
+
+	// MarkDeploymentAsTimedOut marks an MCPServer as failed due to deployment timeout
+	MarkDeploymentAsTimedOut(mcpServer *mcpv1.MCPServer, timeout time.Duration)
 }
 
 // ValidationService defines the interface for validation operations
@@ -102,6 +121,12 @@ type ResourceBuilderService interface {
 
 	// BuildNetworkPolicy builds network policy for MCPServer
 	BuildNetworkPolicy(mcpServer *mcpv1.MCPServer) *networkingv1.NetworkPolicy
+
+	// BuildVirtualService builds Istio VirtualService for MCPServer
+	BuildVirtualService(mcpServer *mcpv1.MCPServer) *unstructured.Unstructured
+
+	// BuildDestinationRule builds Istio DestinationRule for MCPServer
+	BuildDestinationRule(mcpServer *mcpv1.MCPServer) *unstructured.Unstructured
 }
 
 // KubernetesClientService defines the interface for Kubernetes operations

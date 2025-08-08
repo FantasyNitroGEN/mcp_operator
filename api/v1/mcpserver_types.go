@@ -652,6 +652,153 @@ const (
 	IsolationLevelStrict IsolationLevel = "Strict"
 )
 
+// DeploymentStrategySpec определяет стратегию развертывания для MCPServer
+type DeploymentStrategySpec struct {
+	// Type тип стратегии развертывания (RollingUpdate или Recreate)
+	// +kubebuilder:default="RollingUpdate"
+	Type string `json:"type,omitempty"`
+
+	// RollingUpdate параметры для стратегии RollingUpdate
+	RollingUpdate *RollingUpdateDeploymentSpec `json:"rollingUpdate,omitempty"`
+}
+
+// RollingUpdateDeploymentSpec определяет параметры для RollingUpdate стратегии
+type RollingUpdateDeploymentSpec struct {
+	// MaxUnavailable максимальное количество недоступных подов во время обновления
+	// Может быть абсолютным числом (например, 2) или процентом (например, "25%")
+	// По умолчанию 25%
+	// +kubebuilder:default="25%"
+	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
+
+	// MaxSurge максимальное количество дополнительных подов во время обновления
+	// Может быть абсолютным числом (например, 2) или процентом (например, "25%")
+	// По умолчанию 25%
+	// +kubebuilder:default="25%"
+	MaxSurge *intstr.IntOrString `json:"maxSurge,omitempty"`
+}
+
+// IstioSpec определяет конфигурацию интеграции с Istio service mesh
+type IstioSpec struct {
+	// Enabled включает интеграцию с Istio
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled,omitempty"`
+
+	// SidecarInject принудительно включает инъекцию sidecar для подов
+	// Если не указано, используется настройка namespace или глобальная политика Istio
+	// +kubebuilder:default=true
+	SidecarInject *bool `json:"sidecarInject,omitempty"`
+
+	// VirtualService конфигурация VirtualService для внешнего доступа
+	VirtualService *IstioVirtualServiceSpec `json:"virtualService,omitempty"`
+
+	// DestinationRule конфигурация DestinationRule для политик трафика
+	DestinationRule *IstioDestinationRuleSpec `json:"destinationRule,omitempty"`
+
+	// Gateway имя Istio Gateway для маршрутизации трафика
+	// Если не указано, используется default gateway
+	Gateway string `json:"gateway,omitempty"`
+}
+
+// IstioVirtualServiceSpec определяет конфигурацию VirtualService
+type IstioVirtualServiceSpec struct {
+	// Host хост для внешнего доступа (например, myserver.mydomain.com)
+	Host string `json:"host"`
+
+	// Path путь для маршрутизации (по умолчанию "/")
+	// +kubebuilder:default="/"
+	Path string `json:"path,omitempty"`
+
+	// Timeout таймаут для запросов
+	Timeout string `json:"timeout,omitempty"`
+
+	// Retries конфигурация повторных попыток
+	Retries *IstioRetryPolicy `json:"retries,omitempty"`
+
+	// Headers дополнительные заголовки для запросов
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// IstioDestinationRuleSpec определяет конфигурацию DestinationRule
+type IstioDestinationRuleSpec struct {
+	// TrafficPolicy политика трафика
+	TrafficPolicy *IstioTrafficPolicy `json:"trafficPolicy,omitempty"`
+}
+
+// IstioTrafficPolicy определяет политику трафика
+type IstioTrafficPolicy struct {
+	// TLS настройки TLS
+	TLS *IstioTLSSettings `json:"tls,omitempty"`
+
+	// ConnectionPool настройки пула соединений
+	ConnectionPool *IstioConnectionPoolSettings `json:"connectionPool,omitempty"`
+
+	// LoadBalancer настройки балансировки нагрузки
+	LoadBalancer *IstioLoadBalancerSettings `json:"loadBalancer,omitempty"`
+}
+
+// IstioTLSSettings определяет настройки TLS
+type IstioTLSSettings struct {
+	// Mode режим TLS (DISABLE, SIMPLE, MUTUAL, ISTIO_MUTUAL)
+	// +kubebuilder:default="ISTIO_MUTUAL"
+	Mode string `json:"mode,omitempty"`
+}
+
+// IstioConnectionPoolSettings определяет настройки пула соединений
+type IstioConnectionPoolSettings struct {
+	// TCP настройки TCP соединений
+	TCP *IstioTCPSettings `json:"tcp,omitempty"`
+
+	// HTTP настройки HTTP соединений
+	HTTP *IstioHTTPSettings `json:"http,omitempty"`
+}
+
+// IstioTCPSettings определяет настройки TCP
+type IstioTCPSettings struct {
+	// MaxConnections максимальное количество соединений
+	MaxConnections int32 `json:"maxConnections,omitempty"`
+
+	// ConnectTimeout таймаут соединения
+	ConnectTimeout string `json:"connectTimeout,omitempty"`
+}
+
+// IstioHTTPSettings определяет настройки HTTP
+type IstioHTTPSettings struct {
+	// HTTP1MaxPendingRequests максимальное количество ожидающих HTTP запросов
+	HTTP1MaxPendingRequests int32 `json:"http1MaxPendingRequests,omitempty"`
+
+	// HTTP2MaxRequests максимальное количество HTTP2 запросов
+	HTTP2MaxRequests int32 `json:"http2MaxRequests,omitempty"`
+
+	// MaxRequestsPerConnection максимальное количество запросов на соединение
+	MaxRequestsPerConnection int32 `json:"maxRequestsPerConnection,omitempty"`
+
+	// MaxRetries максимальное количество повторных попыток
+	MaxRetries int32 `json:"maxRetries,omitempty"`
+
+	// IdleTimeout таймаут простоя соединения
+	IdleTimeout string `json:"idleTimeout,omitempty"`
+}
+
+// IstioLoadBalancerSettings определяет настройки балансировки нагрузки
+type IstioLoadBalancerSettings struct {
+	// Simple простой алгоритм балансировки (ROUND_ROBIN, LEAST_CONN, RANDOM, PASSTHROUGH)
+	// +kubebuilder:default="ROUND_ROBIN"
+	Simple string `json:"simple,omitempty"`
+}
+
+// IstioRetryPolicy определяет политику повторных попыток
+type IstioRetryPolicy struct {
+	// Attempts количество попыток
+	// +kubebuilder:default=3
+	Attempts int32 `json:"attempts,omitempty"`
+
+	// PerTryTimeout таймаут на попытку
+	PerTryTimeout string `json:"perTryTimeout,omitempty"`
+
+	// RetryOn условия для повторных попыток
+	RetryOn string `json:"retryOn,omitempty"`
+}
+
 // MCPServerSpec определяет желаемое состояние MCPServer
 type MCPServerSpec struct {
 	// Registry содержит информацию о сервере из MCP Registry
@@ -713,6 +860,12 @@ type MCPServerSpec struct {
 
 	// Tenancy конфигурация мультитенантности
 	Tenancy *TenancySpec `json:"tenancy,omitempty"`
+
+	// DeploymentStrategy конфигурация стратегии развертывания
+	DeploymentStrategy *DeploymentStrategySpec `json:"deploymentStrategy,omitempty"`
+
+	// Istio конфигурация интеграции с Istio service mesh
+	Istio *IstioSpec `json:"istio,omitempty"`
 }
 
 // MCPRegistryInfo содержит информацию о сервере из реестра

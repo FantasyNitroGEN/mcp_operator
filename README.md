@@ -172,6 +172,41 @@ mcp deploy filesystem-server --dry-run
 mcp deploy filesystem-server --wait --wait-timeout 5m
 ```
 
+#### Проверка статуса серверов
+
+```bash
+# Получить статус сервера
+mcp status filesystem-server
+
+# Получить статус из определенного namespace
+mcp status filesystem-server --namespace mcp-servers
+
+# Получить статус в JSON формате
+mcp status filesystem-server --output json
+
+# Получить статус в YAML формате
+mcp status filesystem-server --output yaml
+
+# Отслеживать изменения статуса в реальном времени
+mcp status filesystem-server --watch
+```
+
+#### Удаление серверов
+
+```bash
+# Удалить сервер
+mcp delete filesystem-server
+
+# Удалить из определенного namespace
+mcp delete filesystem-server --namespace mcp-servers
+
+# Удалить и дождаться полного удаления всех ресурсов
+mcp delete filesystem-server --wait
+
+# Удалить с настраиваемым таймаутом ожидания
+mcp delete filesystem-server --wait --wait-timeout 10m
+```
+
 #### Дополнительные команды
 
 ```bash
@@ -182,6 +217,8 @@ mcp version
 mcp --help
 mcp registry --help
 mcp deploy --help
+mcp status --help
+mcp delete --help
 ```
 
 ### Развертывание MCP сервера
@@ -250,7 +287,32 @@ kubectl apply --server-side -f mcpserver-registry.yaml
 
 ### Проверка статуса
 
-Посмотрите статус развернутых MCP серверов:
+#### Использование MCP CLI (рекомендуется)
+
+Для удобной проверки статуса используйте команду `mcp status`:
+
+```bash
+# Получить статус сервера в удобном формате
+mcp status filesystem-server
+
+# Пример вывода:
+# Name: filesystem-server
+# Namespace: default
+# Phase: Running
+# Replicas: 1/1
+# Endpoint: filesystem-server.default.svc.cluster.local:8080
+# Age: 5m
+# Registry: filesystem-server
+# 
+# Conditions:
+#   ✓ Ready: True
+#   ✓ Available: True
+#   ✓ RegistryFetched: True - Registry data successfully fetched
+```
+
+#### Использование kubectl
+
+Альтернативно, можно использовать kubectl:
 
 ```bash
 kubectl get mcpservers

@@ -183,10 +183,15 @@ func (r *MCPRegistryReconciler) handleDeletion(ctx context.Context, logger logr.
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MCPRegistryReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return r.SetupWithManagerAndConcurrency(mgr, 3)
+}
+
+// SetupWithManagerAndConcurrency sets up the controller with the Manager and configurable concurrency.
+func (r *MCPRegistryReconciler) SetupWithManagerAndConcurrency(mgr ctrl.Manager, maxConcurrentReconciles int) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mcpv1.MCPRegistry{}).
 		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 3, // Lower concurrency for registry operations
+			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(r)
 }

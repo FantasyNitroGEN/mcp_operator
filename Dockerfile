@@ -35,6 +35,6 @@ FROM scratch
 WORKDIR /
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /workspace/manager .
-USER 65532:65532
+USER 10001:10001
 
 ENTRYPOINT ["/manager"]

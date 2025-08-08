@@ -1758,6 +1758,39 @@ spec:
                           - mountPath
                           type: object
                         type: array
+                      deploymentStrategy:
+                        description: DeploymentStrategy конфигурация стратегии развертывания
+                        properties:
+                          rollingUpdate:
+                            description: RollingUpdate параметры для стратегии RollingUpdate
+                            properties:
+                              maxSurge:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                default: 25%
+                                description: |-
+                                  MaxSurge максимальное количество дополнительных подов во время обновления
+                                  Может быть абсолютным числом (например, 2) или процентом (например, "25%")
+                                  По умолчанию 25%
+                                x-kubernetes-int-or-string: true
+                              maxUnavailable:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                default: 25%
+                                description: |-
+                                  MaxUnavailable максимальное количество недоступных подов во время обновления
+                                  Может быть абсолютным числом (например, 2) или процентом (например, "25%")
+                                  По умолчанию 25%
+                                x-kubernetes-int-or-string: true
+                            type: object
+                          type:
+                            default: RollingUpdate
+                            description: Type тип стратегии развертывания (RollingUpdate
+                              или Recreate)
+                            type: string
+                        type: object
                       envFrom:
                         description: EnvFrom загружает переменные окружения из ConfigMaps
                           и Secrets
@@ -1799,6 +1832,139 @@ spec:
                         additionalProperties:
                           type: string
                         description: Environment содержит переменные окружения
+                        type: object
+                      istio:
+                        description: Istio конфигурация интеграции с Istio service
+                          mesh
+                        properties:
+                          destinationRule:
+                            description: DestinationRule конфигурация DestinationRule
+                              для политик трафика
+                            properties:
+                              trafficPolicy:
+                                description: TrafficPolicy политика трафика
+                                properties:
+                                  connectionPool:
+                                    description: ConnectionPool настройки пула соединений
+                                    properties:
+                                      http:
+                                        description: HTTP настройки HTTP соединений
+                                        properties:
+                                          http1MaxPendingRequests:
+                                            description: HTTP1MaxPendingRequests максимальное
+                                              количество ожидающих HTTP запросов
+                                            format: int32
+                                            type: integer
+                                          http2MaxRequests:
+                                            description: HTTP2MaxRequests максимальное
+                                              количество HTTP2 запросов
+                                            format: int32
+                                            type: integer
+                                          idleTimeout:
+                                            description: IdleTimeout таймаут простоя
+                                              соединения
+                                            type: string
+                                          maxRequestsPerConnection:
+                                            description: MaxRequestsPerConnection
+                                              максимальное количество запросов на
+                                              соединение
+                                            format: int32
+                                            type: integer
+                                          maxRetries:
+                                            description: MaxRetries максимальное количество
+                                              повторных попыток
+                                            format: int32
+                                            type: integer
+                                        type: object
+                                      tcp:
+                                        description: TCP настройки TCP соединений
+                                        properties:
+                                          connectTimeout:
+                                            description: ConnectTimeout таймаут соединения
+                                            type: string
+                                          maxConnections:
+                                            description: MaxConnections максимальное
+                                              количество соединений
+                                            format: int32
+                                            type: integer
+                                        type: object
+                                    type: object
+                                  loadBalancer:
+                                    description: LoadBalancer настройки балансировки
+                                      нагрузки
+                                    properties:
+                                      simple:
+                                        default: ROUND_ROBIN
+                                        description: Simple простой алгоритм балансировки
+                                          (ROUND_ROBIN, LEAST_CONN, RANDOM, PASSTHROUGH)
+                                        type: string
+                                    type: object
+                                  tls:
+                                    description: TLS настройки TLS
+                                    properties:
+                                      mode:
+                                        default: ISTIO_MUTUAL
+                                        description: Mode режим TLS (DISABLE, SIMPLE,
+                                          MUTUAL, ISTIO_MUTUAL)
+                                        type: string
+                                    type: object
+                                type: object
+                            type: object
+                          enabled:
+                            default: false
+                            description: Enabled включает интеграцию с Istio
+                            type: boolean
+                          gateway:
+                            description: |-
+                              Gateway имя Istio Gateway для маршрутизации трафика
+                              Если не указано, используется default gateway
+                            type: string
+                          sidecarInject:
+                            default: true
+                            description: |-
+                              SidecarInject принудительно включает инъекцию sidecar для подов
+                              Если не указано, используется настройка namespace или глобальная политика Istio
+                            type: boolean
+                          virtualService:
+                            description: VirtualService конфигурация VirtualService
+                              для внешнего доступа
+                            properties:
+                              headers:
+                                additionalProperties:
+                                  type: string
+                                description: Headers дополнительные заголовки для
+                                  запросов
+                                type: object
+                              host:
+                                description: Host хост для внешнего доступа (например,
+                                  myserver.mydomain.com)
+                                type: string
+                              path:
+                                default: /
+                                description: Path путь для маршрутизации (по умолчанию
+                                  "/")
+                                type: string
+                              retries:
+                                description: Retries конфигурация повторных попыток
+                                properties:
+                                  attempts:
+                                    default: 3
+                                    description: Attempts количество попыток
+                                    format: int32
+                                    type: integer
+                                  perTryTimeout:
+                                    description: PerTryTimeout таймаут на попытку
+                                    type: string
+                                  retryOn:
+                                    description: RetryOn условия для повторных попыток
+                                    type: string
+                                type: object
+                              timeout:
+                                description: Timeout таймаут для запросов
+                                type: string
+                            required:
+                            - host
+                            type: object
                         type: object
                       nodeSelector:
                         additionalProperties:

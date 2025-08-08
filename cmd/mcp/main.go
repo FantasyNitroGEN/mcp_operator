@@ -30,6 +30,8 @@ This tool allows you to:
 	// Add subcommands
 	rootCmd.AddCommand(newRegistryCmd())
 	rootCmd.AddCommand(newDeployCmd())
+	rootCmd.AddCommand(newStatusCmd())
+	rootCmd.AddCommand(newDeleteCmd())
 	rootCmd.AddCommand(newVersionCmd())
 
 	if err := rootCmd.Execute(); err != nil {

@@ -54,6 +54,22 @@ operator:
       - ALL
 
   # Resource requirements
+  # Recommended configurations based on cluster size:
+  #
+  # Small clusters (1-50 MCPServers):
+  #   requests: cpu: 50m, memory: 64Mi
+  #   limits: cpu: 200m, memory: 256Mi
+  #   optimization: maxConcurrentReconcilesMCPServer: 3, maxConcurrentReconcilesMCPRegistry: 2, gogcPercent: 80
+  #
+  # Medium clusters (51-200 MCPServers):
+  #   requests: cpu: 100m, memory: 128Mi
+  #   limits: cpu: 500m, memory: 512Mi
+  #   optimization: maxConcurrentReconcilesMCPServer: 5, maxConcurrentReconcilesMCPRegistry: 3, gogcPercent: 100
+  #
+  # Large clusters (201+ MCPServers):
+  #   requests: cpu: 200m, memory: 256Mi
+  #   limits: cpu: 1000m, memory: 1Gi
+  #   optimization: maxConcurrentReconcilesMCPServer: 8, maxConcurrentReconcilesMCPRegistry: 5, gogcPercent: 100
   resources:
     limits:
       cpu: 500m
@@ -89,6 +105,24 @@ operator:
       port: 8081
     initialDelaySeconds: 5
     periodSeconds: 10
+
+  # Resource optimization configuration
+  optimization:
+    # Maximum concurrent reconciles for MCPServer controller
+    # Higher values increase throughput but consume more CPU/memory
+    # Recommended: 3-10 depending on cluster size and available resources
+    maxConcurrentReconcilesMCPServer: 5
+    
+    # Maximum concurrent reconciles for MCPRegistry controller
+    # Lower values recommended as registry operations are less frequent
+    # Recommended: 1-5 depending on number of registries
+    maxConcurrentReconcilesMCPRegistry: 3
+    
+    # GOGC percentage for Go garbage collector
+    # Lower values = more frequent GC = lower memory usage but higher CPU
+    # Higher values = less frequent GC = higher memory usage but lower CPU
+    # Default: 100, Recommended for constrained environments: 50-80
+    gogcPercent: 100
 
 # Metrics configuration
 metrics:

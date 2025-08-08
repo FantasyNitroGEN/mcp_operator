@@ -61,6 +61,9 @@ spec:
             - --enable-webhooks
             - --webhook-port=9443
             {{- end }}
+            - --max-concurrent-reconciles-mcpserver={{ .Values.operator.optimization.maxConcurrentReconcilesMCPServer }}
+            - --max-concurrent-reconciles-mcpregistry={{ .Values.operator.optimization.maxConcurrentReconcilesMCPRegistry }}
+            - --gogc-percent={{ .Values.operator.optimization.gogcPercent }}
           {{- with .Values.operator.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
@@ -71,6 +74,9 @@ spec:
               protocol: TCP
             - name: health
               containerPort: 8081
+              protocol: TCP
+            - name: pprof
+              containerPort: 6060
               protocol: TCP
             {{- if eq (include "mcp-operator.webhooksEnabled" .) "true" }}
             - name: webhook

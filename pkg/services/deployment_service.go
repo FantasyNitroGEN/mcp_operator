@@ -287,6 +287,12 @@ func (d *DefaultDeploymentService) DeleteResources(ctx context.Context, mcpServe
 		logger.Info("Successfully deleted VPA")
 	}
 
+	// Delete Istio resources if they exist
+	if err := d.DeleteIstioResources(ctx, mcpServer); err != nil {
+		logger.Error(err, "Failed to delete Istio resources")
+		// Continue with deletion even if Istio resource deletion fails
+	}
+
 	return nil
 }
 
@@ -305,11 +311,237 @@ func (d *DefaultDeploymentService) GetDeploymentStatus(ctx context.Context, mcpS
 	return deployment, nil
 }
 
+// CreateOrUpdateVirtualService creates or updates Istio VirtualService
+func (d *DefaultDeploymentService) CreateOrUpdateVirtualService(ctx context.Context, mcpServer *mcpv1.MCPServer) (*unstructured.Unstructured, error) {
+	logger := log.FromContext(ctx).WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
+	logger.Info("Creating or updating Istio VirtualService")
+
+	// Check if Istio is enabled for this MCPServer
+	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.VirtualService == nil {
+		return nil, fmt.Errorf("Istio VirtualService configuration is not available or not enabled")
+	}
+
+	// Check if Istio CRDs are available
+	available, err := d.IsIstioAvailable(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check Istio availability: %w", err)
+	}
+	if !available {
+		logger.Info("Istio CRDs not available, skipping VirtualService creation")
+		return nil, fmt.Errorf("Istio CRDs are not available in the cluster")
+	}
+
+	// Build the desired VirtualService
+	virtualService := d.resourceBuilder.BuildVirtualService(mcpServer)
+	if virtualService == nil {
+		return nil, fmt.Errorf("VirtualService configuration is not available")
+	}
+
+	// Set controller reference
+	if err := controllerutil.SetControllerReference(mcpServer, virtualService, d.client.Scheme()); err != nil {
+		return nil, fmt.Errorf("failed to set controller reference: %w", err)
+	}
+
+	// Check if VirtualService already exists
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(virtualService.GroupVersionKind())
+	key := types.NamespacedName{Name: virtualService.GetName(), Namespace: virtualService.GetNamespace()}
+
+	err = d.kubernetesClient.Get(ctx, key, existing)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create new VirtualService
+			logger.Info("Creating new VirtualService")
+			if err := d.kubernetesClient.Create(ctx, virtualService); err != nil {
+				return nil, fmt.Errorf("failed to create VirtualService: %w", err)
+			}
+			return virtualService, nil
+		}
+		return nil, fmt.Errorf("failed to get existing VirtualService: %w", err)
+	}
+
+	// Update existing VirtualService
+	logger.Info("Updating existing VirtualService")
+	virtualService.SetResourceVersion(existing.GetResourceVersion())
+	if err := d.kubernetesClient.Update(ctx, virtualService); err != nil {
+		return nil, fmt.Errorf("failed to update VirtualService: %w", err)
+	}
+
+	return virtualService, nil
+}
+
+// CreateOrUpdateDestinationRule creates or updates Istio DestinationRule
+func (d *DefaultDeploymentService) CreateOrUpdateDestinationRule(ctx context.Context, mcpServer *mcpv1.MCPServer) (*unstructured.Unstructured, error) {
+	logger := log.FromContext(ctx).WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
+	logger.Info("Creating or updating Istio DestinationRule")
+
+	// Check if Istio is enabled for this MCPServer
+	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.DestinationRule == nil {
+		return nil, fmt.Errorf("Istio DestinationRule configuration is not available or not enabled")
+	}
+
+	// Check if Istio CRDs are available
+	available, err := d.IsIstioAvailable(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check Istio availability: %w", err)
+	}
+	if !available {
+		logger.Info("Istio CRDs not available, skipping DestinationRule creation")
+		return nil, fmt.Errorf("Istio CRDs are not available in the cluster")
+	}
+
+	// Build the desired DestinationRule
+	destinationRule := d.resourceBuilder.BuildDestinationRule(mcpServer)
+	if destinationRule == nil {
+		return nil, fmt.Errorf("DestinationRule configuration is not available")
+	}
+
+	// Set controller reference
+	if err := controllerutil.SetControllerReference(mcpServer, destinationRule, d.client.Scheme()); err != nil {
+		return nil, fmt.Errorf("failed to set controller reference: %w", err)
+	}
+
+	// Check if DestinationRule already exists
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(destinationRule.GroupVersionKind())
+	key := types.NamespacedName{Name: destinationRule.GetName(), Namespace: destinationRule.GetNamespace()}
+
+	err = d.kubernetesClient.Get(ctx, key, existing)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create new DestinationRule
+			logger.Info("Creating new DestinationRule")
+			if err := d.kubernetesClient.Create(ctx, destinationRule); err != nil {
+				return nil, fmt.Errorf("failed to create DestinationRule: %w", err)
+			}
+			return destinationRule, nil
+		}
+		return nil, fmt.Errorf("failed to get existing DestinationRule: %w", err)
+	}
+
+	// Update existing DestinationRule
+	logger.Info("Updating existing DestinationRule")
+	destinationRule.SetResourceVersion(existing.GetResourceVersion())
+	if err := d.kubernetesClient.Update(ctx, destinationRule); err != nil {
+		return nil, fmt.Errorf("failed to update DestinationRule: %w", err)
+	}
+
+	return destinationRule, nil
+}
+
+// DeleteIstioResources deletes Istio resources associated with MCPServer
+func (d *DefaultDeploymentService) DeleteIstioResources(ctx context.Context, mcpServer *mcpv1.MCPServer) error {
+	logger := log.FromContext(ctx).WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
+	logger.Info("Deleting Istio resources associated with MCPServer")
+
+	// Check if Istio CRDs are available
+	available, err := d.IsIstioAvailable(ctx)
+	if err != nil {
+		logger.Error(err, "Failed to check Istio availability, skipping Istio resource deletion")
+		return nil // Don't fail the deletion if we can't check Istio availability
+	}
+	if !available {
+		logger.Info("Istio CRDs not available, skipping Istio resource deletion")
+		return nil
+	}
+
+	// Delete VirtualService
+	virtualService := &unstructured.Unstructured{}
+	virtualService.SetGroupVersionKind(d.getVirtualServiceGroupVersionKind())
+	virtualService.SetName(mcpServer.Name)
+	virtualService.SetNamespace(mcpServer.Namespace)
+
+	if err := d.kubernetesClient.Delete(ctx, virtualService); err != nil {
+		if !errors.IsNotFound(err) {
+			logger.Error(err, "Failed to delete VirtualService")
+		}
+	} else {
+		logger.Info("Successfully deleted VirtualService")
+	}
+
+	// Delete DestinationRule
+	destinationRule := &unstructured.Unstructured{}
+	destinationRule.SetGroupVersionKind(d.getDestinationRuleGroupVersionKind())
+	destinationRule.SetName(mcpServer.Name)
+	destinationRule.SetNamespace(mcpServer.Namespace)
+
+	if err := d.kubernetesClient.Delete(ctx, destinationRule); err != nil {
+		if !errors.IsNotFound(err) {
+			logger.Error(err, "Failed to delete DestinationRule")
+		}
+	} else {
+		logger.Info("Successfully deleted DestinationRule")
+	}
+
+	return nil
+}
+
+// IsIstioAvailable checks if Istio CRDs are available in the cluster
+func (d *DefaultDeploymentService) IsIstioAvailable(ctx context.Context) (bool, error) {
+	logger := log.FromContext(ctx)
+	logger.V(1).Info("Checking if Istio CRDs are available")
+
+	// Check for VirtualService CRD
+	virtualServiceCRD := &unstructured.Unstructured{}
+	virtualServiceCRD.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "apiextensions.k8s.io",
+		Version: "v1",
+		Kind:    "CustomResourceDefinition",
+	})
+	virtualServiceCRD.SetName("virtualservices.networking.istio.io")
+
+	if err := d.kubernetesClient.Get(ctx, types.NamespacedName{Name: "virtualservices.networking.istio.io"}, virtualServiceCRD); err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("VirtualService CRD not found, Istio not available")
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check VirtualService CRD: %w", err)
+	}
+
+	// Check for DestinationRule CRD
+	destinationRuleCRD := &unstructured.Unstructured{}
+	destinationRuleCRD.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "apiextensions.k8s.io",
+		Version: "v1",
+		Kind:    "CustomResourceDefinition",
+	})
+	destinationRuleCRD.SetName("destinationrules.networking.istio.io")
+
+	if err := d.kubernetesClient.Get(ctx, types.NamespacedName{Name: "destinationrules.networking.istio.io"}, destinationRuleCRD); err != nil {
+		if errors.IsNotFound(err) {
+			logger.V(1).Info("DestinationRule CRD not found, Istio not available")
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check DestinationRule CRD: %w", err)
+	}
+
+	logger.V(1).Info("Istio CRDs are available")
+	return true, nil
+}
+
 // getVPAGroupVersionKind returns the GroupVersionKind for VPA
 func (d *DefaultDeploymentService) getVPAGroupVersionKind() schema.GroupVersionKind {
 	return schema.GroupVersionKind{
 		Group:   "autoscaling.k8s.io",
 		Version: "v1",
 		Kind:    "VerticalPodAutoscaler",
+	}
+}
+
+// getVirtualServiceGroupVersionKind returns the GroupVersionKind for Istio VirtualService
+func (d *DefaultDeploymentService) getVirtualServiceGroupVersionKind() schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Group:   "networking.istio.io",
+		Version: "v1beta1",
+		Kind:    "VirtualService",
+	}
+}
+
+// getDestinationRuleGroupVersionKind returns the GroupVersionKind for Istio DestinationRule
+func (d *DefaultDeploymentService) getDestinationRuleGroupVersionKind() schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Group:   "networking.istio.io",
+		Version: "v1beta1",
+		Kind:    "DestinationRule",
 	}
 }

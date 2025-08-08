@@ -1,0 +1,192 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.0
+  name: mcpregistries.mcp.allbeone.io
+spec:
+  group: mcp.allbeone.io
+  names:
+    kind: MCPRegistry
+    listKind: MCPRegistryList
+    plural: mcpregistries
+    singular: mcpregistry
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.url
+      name: URL
+      type: string
+    - jsonPath: .status.availableServers
+      name: Servers
+      type: integer
+    - jsonPath: .status.lastSyncTime
+      name: Last Sync
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: MCPRegistry is the Schema for the mcpregistries API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: MCPRegistrySpec defines the desired state of MCPRegistry
+            properties:
+              auth:
+                description: Auth contains authentication information for the registry
+                properties:
+                  secretRef:
+                    description: SecretRef references a secret containing authentication
+                      credentials
+                    properties:
+                      envVar:
+                        description: EnvVar имя переменной окружения
+                        type: string
+                      key:
+                        description: Key ключ в секрете
+                        type: string
+                      name:
+                        description: Name имя секрета
+                        type: string
+                      optional:
+                        description: Optional указывает, что секрет может отсутствовать
+                        type: boolean
+                    required:
+                    - envVar
+                    - key
+                    - name
+                    type: object
+                  token:
+                    description: Token is a direct token for authentication (not recommended
+                      for production)
+                    type: string
+                type: object
+              servers:
+                description: Servers is a list of specific servers to sync from this
+                  registry
+                items:
+                  type: string
+                type: array
+              syncInterval:
+                description: SyncInterval specifies how often to sync with the registry
+                type: string
+              type:
+                description: Type specifies the registry type (github, local, etc.)
+                type: string
+              url:
+                description: URL is the base URL of the MCP registry
+                type: string
+            required:
+            - url
+            type: object
+          status:
+            description: MCPRegistryStatus defines the observed state of MCPRegistry
+            properties:
+              availableServers:
+                description: AvailableServers is the number of servers available in
+                  this registry
+                format: int32
+                type: integer
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the registry's state
+                items:
+                  description: MCPRegistryCondition describes the state of a registry
+                    at a certain point
+                  properties:
+                    lastTransitionTime:
+                      description: Last time the condition transitioned from one status
+                        to another
+                      format: date-time
+                      type: string
+                    message:
+                      description: Human-readable message indicating details about
+                        last transition
+                      type: string
+                    reason:
+                      description: Unique, one-word, CamelCase reason for the condition's
+                        last transition
+                      type: string
+                    status:
+                      description: Status of the condition, one of True, False, Unknown
+                      type: string
+                    type:
+                      description: Type of registry condition
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastSyncTime:
+                description: LastSyncTime is the last time the registry was successfully
+                  synced
+                format: date-time
+                type: string
+              message:
+                description: Message provides human-readable information about the
+                  registry status
+                type: string
+              phase:
+                description: Phase represents the current phase of the registry
+                type: string
+              reason:
+                description: Reason provides a brief reason for the current status
+                type: string
+              serverList:
+                description: ServerList contains information about available servers
+                  in the registry
+                items:
+                  description: MCPServerInfo contains information about a server available
+                    in the registry
+                  properties:
+                    description:
+                      description: Description of the server
+                      type: string
+                    lastUpdated:
+                      description: LastUpdated is when the server was last updated
+                        in the registry
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name of the server
+                      type: string
+                    version:
+                      description: Version of the server
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

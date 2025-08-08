@@ -7,18 +7,19 @@ import (
 
 // MCPServerSpec представляет спецификацию MCP сервера из реестра
 type MCPServerSpec struct {
-	Name         string            `json:"name" yaml:"name"`
-	Version      string            `json:"version" yaml:"version"`
-	Description  string            `json:"description" yaml:"description"`
-	Repository   string            `json:"repository" yaml:"repository"`
-	License      string            `json:"license" yaml:"license"`
-	Author       string            `json:"author" yaml:"author"`
-	Homepage     string            `json:"homepage" yaml:"homepage"`
-	Keywords     []string          `json:"keywords" yaml:"keywords"`
-	Runtime      RuntimeSpec       `json:"runtime" yaml:"runtime"`
-	Config       ConfigSpec        `json:"config" yaml:"config"`
-	Capabilities []string          `json:"capabilities" yaml:"capabilities"`
-	Environment  map[string]string `json:"environment" yaml:"environment"`
+	Name           string            `json:"name" yaml:"name"`
+	Version        string            `json:"version" yaml:"version"`
+	Description    string            `json:"description" yaml:"description"`
+	Repository     string            `json:"repository" yaml:"repository"`
+	License        string            `json:"license" yaml:"license"`
+	Author         string            `json:"author" yaml:"author"`
+	Homepage       string            `json:"homepage" yaml:"homepage"`
+	Keywords       []string          `json:"keywords" yaml:"keywords"`
+	Runtime        RuntimeSpec       `json:"runtime" yaml:"runtime"`
+	Config         ConfigSpec        `json:"config" yaml:"config"`
+	Capabilities   []string          `json:"capabilities" yaml:"capabilities"`
+	Environment    map[string]string `json:"environment" yaml:"environment"`
+	TemplateDigest string            `json:"template_digest,omitempty"` // SHA256 digest of raw server.yaml content
 }
 
 // RuntimeSpec описывает среду выполнения MCP сервера

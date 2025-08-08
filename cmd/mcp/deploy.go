@@ -25,6 +25,11 @@ func newDeployCmd() *cobra.Command {
 		dryRun      bool
 		wait        bool
 		waitTimeout time.Duration
+		// Autoscaling flags
+		autoscale   bool
+		minReplicas int32
+		maxReplicas int32
+		targetCPU   int32
 	)
 
 	cmd := &cobra.Command{
@@ -42,6 +47,12 @@ enrich with registry data and deploy as a running server.`,
   # Deploy with custom replicas
   mcp deploy filesystem-server --replicas 3
 
+  # Deploy with autoscaling enabled
+  mcp deploy filesystem-server --autoscale --min 1 --max 5 --target-cpu 70
+
+  # Deploy with autoscaling using default values (min=1, max=10, target-cpu=80%)
+  mcp deploy filesystem-server --autoscale
+
   # Dry run to see what would be created
   mcp deploy filesystem-server --dry-run
 
@@ -49,22 +60,28 @@ enrich with registry data and deploy as a running server.`,
   mcp deploy filesystem-server --wait --wait-timeout 5m`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeploy(args[0], namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout)
+			return runDeploy(args[0], namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU)
 		},
 	}
 
 	cmd.Flags().StringVarP(&namespace, "namespace", "n", "default", "Kubernetes namespace to deploy to")
 	cmd.Flags().StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (uses default if not specified)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "Timeout for Kubernetes operations")
-	cmd.Flags().Int32Var(&replicas, "replicas", 1, "Number of replicas to deploy")
+	cmd.Flags().Int32Var(&replicas, "replicas", 1, "Number of replicas to deploy (ignored when autoscaling is enabled)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the resource that would be created without actually creating it")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Wait for the deployment to be ready")
 	cmd.Flags().DurationVar(&waitTimeout, "wait-timeout", 5*time.Minute, "Timeout for waiting for deployment to be ready")
 
+	// Autoscaling flags
+	cmd.Flags().BoolVar(&autoscale, "autoscale", false, "Enable horizontal pod autoscaling")
+	cmd.Flags().Int32Var(&minReplicas, "min", 1, "Minimum number of replicas for autoscaling")
+	cmd.Flags().Int32Var(&maxReplicas, "max", 10, "Maximum number of replicas for autoscaling")
+	cmd.Flags().Int32Var(&targetCPU, "target-cpu", 80, "Target CPU utilization percentage for autoscaling")
+
 	return cmd
 }
 
-func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration) error {
+func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32) error {
 	// First, verify the server exists in the registry
 	fmt.Printf("Verifying server '%s' exists in registry...\n", serverName)
 
@@ -103,8 +120,25 @@ func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, 
 			Runtime: mcpv1.MCPRuntimeSpec{
 				Type: "docker", // Default to docker, will be enriched from registry
 			},
-			Replicas: &replicas,
 		},
+	}
+
+	// Configure autoscaling if enabled
+	if autoscale {
+		fmt.Printf("Configuring autoscaling: min=%d, max=%d, target-cpu=%d%%\n", minReplicas, maxReplicas, targetCPU)
+		mcpServer.Spec.Autoscaling = &mcpv1.AutoscalingSpec{
+			HPA: &mcpv1.HPASpec{
+				Enabled:                        true,
+				MinReplicas:                    &minReplicas,
+				MaxReplicas:                    maxReplicas,
+				TargetCPUUtilizationPercentage: &targetCPU,
+			},
+		}
+		// When autoscaling is enabled, don't set static replicas
+		// The HPA will manage replica count dynamically
+	} else {
+		// Only set replicas when autoscaling is not enabled
+		mcpServer.Spec.Replicas = &replicas
 	}
 
 	if dryRun {

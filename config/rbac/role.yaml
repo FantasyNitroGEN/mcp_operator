@@ -5,6 +5,43 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - pods
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - apps
   resources:
   - deployments
@@ -43,9 +80,7 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - configmaps
   - persistentvolumeclaims
-  - services
   verbs:
   - create
   - delete
@@ -65,6 +100,7 @@ rules:
 - apiGroups:
   - mcp.allbeone.io
   resources:
+  - mcpregistries
   - mcpserverbackups
   - mcpservers
   verbs:
@@ -78,6 +114,7 @@ rules:
 - apiGroups:
   - mcp.allbeone.io
   resources:
+  - mcpregistries/finalizers
   - mcpserverbackups/finalizers
   - mcpservers/finalizers
   verbs:
@@ -85,12 +122,26 @@ rules:
 - apiGroups:
   - mcp.allbeone.io
   resources:
+  - mcpregistries/status
   - mcpserverbackups/status
   - mcpservers/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - networking.istio.io
+  resources:
+  - destinationrules
+  - virtualservices
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - networking.k8s.io
   resources:

@@ -30,12 +30,6 @@ func (r *DefaultResourceBuilderService) BuildDeployment(mcpServer *mcpv1.MCPServ
 	logger := log.Log.WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
 	logger.V(1).Info("Building deployment")
 
-	// Default values
-	replicas := int32(1)
-	if mcpServer.Spec.Replicas != nil {
-		replicas = *mcpServer.Spec.Replicas
-	}
-
 	// Build labels
 	labels := r.buildLabels(mcpServer)
 
@@ -52,22 +46,37 @@ func (r *DefaultResourceBuilderService) BuildDeployment(mcpServer *mcpv1.MCPServ
 			Labels:    labels,
 		},
 		Spec: appsv1.DeploymentSpec{
-			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: selector,
 			},
 			Template: podTemplate,
-			Strategy: appsv1.DeploymentStrategy{
-				Type: appsv1.RollingUpdateDeploymentStrategyType,
-				RollingUpdate: &appsv1.RollingUpdateDeployment{
-					MaxUnavailable: &intstr.IntOrString{Type: intstr.String, StrVal: "25%"},
-					MaxSurge:       &intstr.IntOrString{Type: intstr.String, StrVal: "25%"},
-				},
-			},
+			Strategy: r.buildDeploymentStrategy(mcpServer),
 		},
 	}
 
-	logger.V(1).Info("Deployment built successfully", "replicas", replicas)
+	// Only set replicas if HPA is not enabled
+	// When HPA is enabled, it will manage the replica count
+	if mcpServer.Spec.Autoscaling == nil || mcpServer.Spec.Autoscaling.HPA == nil || !mcpServer.Spec.Autoscaling.HPA.Enabled {
+		// Default values
+		replicas := int32(1)
+		if mcpServer.Spec.Replicas != nil {
+			replicas = *mcpServer.Spec.Replicas
+		}
+		deployment.Spec.Replicas = &replicas
+		logger.V(1).Info("Deployment built successfully", "replicas", replicas, "hpa_enabled", false)
+	} else {
+		// When HPA is enabled, use MinReplicas as initial replica count if specified
+		if mcpServer.Spec.Autoscaling.HPA.MinReplicas != nil {
+			deployment.Spec.Replicas = mcpServer.Spec.Autoscaling.HPA.MinReplicas
+			logger.V(1).Info("Deployment built successfully", "initial_replicas", *mcpServer.Spec.Autoscaling.HPA.MinReplicas, "hpa_enabled", true)
+		} else {
+			// Use default of 1 if no MinReplicas specified
+			replicas := int32(1)
+			deployment.Spec.Replicas = &replicas
+			logger.V(1).Info("Deployment built successfully", "initial_replicas", replicas, "hpa_enabled", true)
+		}
+	}
+
 	return deployment
 }
 
@@ -148,6 +157,7 @@ func (r *DefaultResourceBuilderService) BuildHPA(mcpServer *mcpv1.MCPServer) *au
 			MinReplicas: &minReplicas,
 			MaxReplicas: hpaSpec.MaxReplicas,
 			Metrics:     r.buildHPAMetrics(hpaSpec),
+			Behavior:    r.buildHPABehavior(hpaSpec),
 		},
 	}
 
@@ -351,9 +361,28 @@ func (r *DefaultResourceBuilderService) buildPodTemplate(mcpServer *mcpv1.MCPSer
 		podSpec.Volumes = r.buildVolumes(mcpServer.Spec.Volumes)
 	}
 
+	// Build annotations for pod template
+	annotations := make(map[string]string)
+
+	// Add Istio sidecar injection annotation if enabled
+	if mcpServer.Spec.Istio != nil && mcpServer.Spec.Istio.Enabled {
+		// Check if sidecar injection is explicitly configured
+		if mcpServer.Spec.Istio.SidecarInject != nil {
+			if *mcpServer.Spec.Istio.SidecarInject {
+				annotations["sidecar.istio.io/inject"] = "true"
+			} else {
+				annotations["sidecar.istio.io/inject"] = "false"
+			}
+		} else {
+			// Default to true if Istio is enabled but sidecar injection is not explicitly set
+			annotations["sidecar.istio.io/inject"] = "true"
+		}
+	}
+
 	return corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels: labels,
+			Labels:      labels,
+			Annotations: annotations,
 		},
 		Spec: podSpec,
 	}
@@ -543,7 +572,168 @@ func (r *DefaultResourceBuilderService) buildHPAMetrics(hpaSpec *mcpv1.HPASpec) 
 		})
 	}
 
+	// Add custom metrics if specified
+	for _, customMetric := range hpaSpec.Metrics {
+		metric := r.buildCustomMetric(customMetric)
+		if metric != nil {
+			metrics = append(metrics, *metric)
+		}
+	}
+
+	// If no metrics are specified, default to 80% CPU utilization
+	if len(metrics) == 0 {
+		defaultCPUTarget := int32(80)
+		metrics = append(metrics, autoscalingv2.MetricSpec{
+			Type: autoscalingv2.ResourceMetricSourceType,
+			Resource: &autoscalingv2.ResourceMetricSource{
+				Name: corev1.ResourceCPU,
+				Target: autoscalingv2.MetricTarget{
+					Type:               autoscalingv2.UtilizationMetricType,
+					AverageUtilization: &defaultCPUTarget,
+				},
+			},
+		})
+	}
+
 	return metrics
+}
+
+// buildCustomMetric builds a custom metric from MCPv1 MetricSpec
+func (r *DefaultResourceBuilderService) buildCustomMetric(metricSpec mcpv1.MetricSpec) *autoscalingv2.MetricSpec {
+	switch metricSpec.Type {
+	case mcpv1.MetricTypeResource:
+		if metricSpec.Resource != nil {
+			return &autoscalingv2.MetricSpec{
+				Type: autoscalingv2.ResourceMetricSourceType,
+				Resource: &autoscalingv2.ResourceMetricSource{
+					Name:   corev1.ResourceName(metricSpec.Resource.Name),
+					Target: r.buildMetricTarget(metricSpec.Resource.Target),
+				},
+			}
+		}
+	case mcpv1.MetricTypePods:
+		if metricSpec.Pods != nil {
+			return &autoscalingv2.MetricSpec{
+				Type: autoscalingv2.PodsMetricSourceType,
+				Pods: &autoscalingv2.PodsMetricSource{
+					Metric: autoscalingv2.MetricIdentifier{
+						Name:     metricSpec.Pods.Metric.Name,
+						Selector: metricSpec.Pods.Metric.Selector,
+					},
+					Target: r.buildMetricTarget(metricSpec.Pods.Target),
+				},
+			}
+		}
+	case mcpv1.MetricTypeObject:
+		if metricSpec.Object != nil {
+			return &autoscalingv2.MetricSpec{
+				Type: autoscalingv2.ObjectMetricSourceType,
+				Object: &autoscalingv2.ObjectMetricSource{
+					DescribedObject: autoscalingv2.CrossVersionObjectReference{
+						APIVersion: metricSpec.Object.DescribedObject.APIVersion,
+						Kind:       metricSpec.Object.DescribedObject.Kind,
+						Name:       metricSpec.Object.DescribedObject.Name,
+					},
+					Metric: autoscalingv2.MetricIdentifier{
+						Name:     metricSpec.Object.Metric.Name,
+						Selector: metricSpec.Object.Metric.Selector,
+					},
+					Target: r.buildMetricTarget(metricSpec.Object.Target),
+				},
+			}
+		}
+	case mcpv1.MetricTypeExternal:
+		if metricSpec.External != nil {
+			return &autoscalingv2.MetricSpec{
+				Type: autoscalingv2.ExternalMetricSourceType,
+				External: &autoscalingv2.ExternalMetricSource{
+					Metric: autoscalingv2.MetricIdentifier{
+						Name:     metricSpec.External.Metric.Name,
+						Selector: metricSpec.External.Metric.Selector,
+					},
+					Target: r.buildMetricTarget(metricSpec.External.Target),
+				},
+			}
+		}
+	}
+	return nil
+}
+
+// buildMetricTarget builds a metric target from MCPv1 MetricTarget
+func (r *DefaultResourceBuilderService) buildMetricTarget(target mcpv1.MetricTarget) autoscalingv2.MetricTarget {
+	metricTarget := autoscalingv2.MetricTarget{
+		Type: autoscalingv2.MetricTargetType(target.Type),
+	}
+
+	if target.Value != nil {
+		metricTarget.Value = target.Value
+	}
+
+	if target.AverageValue != nil {
+		metricTarget.AverageValue = target.AverageValue
+	}
+
+	if target.AverageUtilization != nil {
+		metricTarget.AverageUtilization = target.AverageUtilization
+	}
+
+	return metricTarget
+}
+
+// buildHPABehavior builds HPA behavior policies
+func (r *DefaultResourceBuilderService) buildHPABehavior(hpaSpec *mcpv1.HPASpec) *autoscalingv2.HorizontalPodAutoscalerBehavior {
+	if hpaSpec.Behavior == nil {
+		return nil
+	}
+
+	behavior := &autoscalingv2.HorizontalPodAutoscalerBehavior{}
+
+	// Build scale up behavior
+	if hpaSpec.Behavior.ScaleUp != nil {
+		behavior.ScaleUp = r.buildHPAScalingRules(hpaSpec.Behavior.ScaleUp)
+	}
+
+	// Build scale down behavior
+	if hpaSpec.Behavior.ScaleDown != nil {
+		behavior.ScaleDown = r.buildHPAScalingRules(hpaSpec.Behavior.ScaleDown)
+	}
+
+	return behavior
+}
+
+// buildHPAScalingRules builds HPA scaling rules
+func (r *DefaultResourceBuilderService) buildHPAScalingRules(rules *mcpv1.HPAScalingRules) *autoscalingv2.HPAScalingRules {
+	if rules == nil {
+		return nil
+	}
+
+	scalingRules := &autoscalingv2.HPAScalingRules{}
+
+	// Set stabilization window
+	if rules.StabilizationWindowSeconds != nil {
+		scalingRules.StabilizationWindowSeconds = rules.StabilizationWindowSeconds
+	}
+
+	// Set select policy
+	if rules.SelectPolicy != nil {
+		selectPolicy := autoscalingv2.ScalingPolicySelect(*rules.SelectPolicy)
+		scalingRules.SelectPolicy = &selectPolicy
+	}
+
+	// Build policies
+	if len(rules.Policies) > 0 {
+		policies := make([]autoscalingv2.HPAScalingPolicy, len(rules.Policies))
+		for i, policy := range rules.Policies {
+			policies[i] = autoscalingv2.HPAScalingPolicy{
+				Type:          autoscalingv2.HPAScalingPolicyType(policy.Type),
+				Value:         policy.Value,
+				PeriodSeconds: policy.PeriodSeconds,
+			}
+		}
+		scalingRules.Policies = policies
+	}
+
+	return scalingRules
 }
 
 // buildIngressRules builds ingress rules for network policy
@@ -862,4 +1052,270 @@ func (r *DefaultResourceBuilderService) isSystemLabel(key string) bool {
 // isResourceRequirementsEmpty checks if resource requirements are empty
 func (r *DefaultResourceBuilderService) isResourceRequirementsEmpty(resources mcpv1.ResourceRequirements) bool {
 	return len(resources.Limits) == 0 && len(resources.Requests) == 0
+}
+
+// buildDeploymentStrategy builds deployment strategy configuration
+func (r *DefaultResourceBuilderService) buildDeploymentStrategy(mcpServer *mcpv1.MCPServer) appsv1.DeploymentStrategy {
+	// Default strategy for zero-downtime deployments
+	defaultMaxUnavailable := &intstr.IntOrString{Type: intstr.Int, IntVal: 0}
+	defaultMaxSurge := &intstr.IntOrString{Type: intstr.Int, IntVal: 1}
+
+	// If no deployment strategy is specified, use zero-downtime defaults
+	if mcpServer.Spec.DeploymentStrategy == nil {
+		return appsv1.DeploymentStrategy{
+			Type: appsv1.RollingUpdateDeploymentStrategyType,
+			RollingUpdate: &appsv1.RollingUpdateDeployment{
+				MaxUnavailable: defaultMaxUnavailable,
+				MaxSurge:       defaultMaxSurge,
+			},
+		}
+	}
+
+	strategy := mcpServer.Spec.DeploymentStrategy
+
+	// Handle Recreate strategy
+	if strategy.Type == "Recreate" {
+		return appsv1.DeploymentStrategy{
+			Type: appsv1.RecreateDeploymentStrategyType,
+		}
+	}
+
+	// Handle RollingUpdate strategy (default)
+	rollingUpdate := &appsv1.RollingUpdateDeployment{
+		MaxUnavailable: defaultMaxUnavailable,
+		MaxSurge:       defaultMaxSurge,
+	}
+
+	// Use custom rolling update parameters if specified
+	if strategy.RollingUpdate != nil {
+		if strategy.RollingUpdate.MaxUnavailable != nil {
+			rollingUpdate.MaxUnavailable = strategy.RollingUpdate.MaxUnavailable
+		}
+		if strategy.RollingUpdate.MaxSurge != nil {
+			rollingUpdate.MaxSurge = strategy.RollingUpdate.MaxSurge
+		}
+	}
+
+	return appsv1.DeploymentStrategy{
+		Type:          appsv1.RollingUpdateDeploymentStrategyType,
+		RollingUpdate: rollingUpdate,
+	}
+}
+
+// BuildVirtualService builds Istio VirtualService for MCPServer
+func (r *DefaultResourceBuilderService) BuildVirtualService(mcpServer *mcpv1.MCPServer) *unstructured.Unstructured {
+	logger := log.Log.WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
+	logger.V(1).Info("Building VirtualService")
+
+	// Check if Istio is enabled and VirtualService is configured
+	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.VirtualService == nil {
+		return nil
+	}
+
+	istioConfig := mcpServer.Spec.Istio
+	vsConfig := istioConfig.VirtualService
+
+	// Set default path if not specified
+	path := vsConfig.Path
+	if path == "" {
+		path = "/"
+	}
+
+	// Set default gateway if not specified
+	gateway := istioConfig.Gateway
+	if gateway == "" {
+		gateway = "default"
+	}
+
+	// Build VirtualService spec
+	spec := map[string]interface{}{
+		"hosts":    []string{vsConfig.Host},
+		"gateways": []string{gateway},
+		"http": []map[string]interface{}{
+			{
+				"match": []map[string]interface{}{
+					{
+						"uri": map[string]interface{}{
+							"prefix": path,
+						},
+					},
+				},
+				"route": []map[string]interface{}{
+					{
+						"destination": map[string]interface{}{
+							"host": fmt.Sprintf("%s.%s.svc.cluster.local", mcpServer.Name, mcpServer.Namespace),
+							"port": map[string]interface{}{
+								"number": mcpServer.Spec.Runtime.Port,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Add timeout if specified
+	if vsConfig.Timeout != "" {
+		httpRoute := spec["http"].([]map[string]interface{})[0]
+		httpRoute["timeout"] = vsConfig.Timeout
+	}
+
+	// Add retries if specified
+	if vsConfig.Retries != nil {
+		httpRoute := spec["http"].([]map[string]interface{})[0]
+		retries := map[string]interface{}{}
+
+		if vsConfig.Retries.Attempts > 0 {
+			retries["attempts"] = vsConfig.Retries.Attempts
+		}
+		if vsConfig.Retries.PerTryTimeout != "" {
+			retries["perTryTimeout"] = vsConfig.Retries.PerTryTimeout
+		}
+		if vsConfig.Retries.RetryOn != "" {
+			retries["retryOn"] = vsConfig.Retries.RetryOn
+		}
+
+		if len(retries) > 0 {
+			httpRoute["retries"] = retries
+		}
+	}
+
+	// Add headers if specified
+	if len(vsConfig.Headers) > 0 {
+		httpRoute := spec["http"].([]map[string]interface{})[0]
+		headers := map[string]interface{}{
+			"request": map[string]interface{}{
+				"set": vsConfig.Headers,
+			},
+		}
+		httpRoute["headers"] = headers
+	}
+
+	// Create VirtualService resource
+	virtualService := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.istio.io/v1beta1",
+			"kind":       "VirtualService",
+			"metadata": map[string]interface{}{
+				"name":      mcpServer.Name,
+				"namespace": mcpServer.Namespace,
+				"labels":    r.buildLabels(mcpServer),
+			},
+			"spec": spec,
+		},
+	}
+
+	return virtualService
+}
+
+// BuildDestinationRule builds Istio DestinationRule for MCPServer
+func (r *DefaultResourceBuilderService) BuildDestinationRule(mcpServer *mcpv1.MCPServer) *unstructured.Unstructured {
+	logger := log.Log.WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
+	logger.V(1).Info("Building DestinationRule")
+
+	// Check if Istio is enabled and DestinationRule is configured
+	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.DestinationRule == nil {
+		return nil
+	}
+
+	istioConfig := mcpServer.Spec.Istio
+	drConfig := istioConfig.DestinationRule
+
+	// Build DestinationRule spec
+	spec := map[string]interface{}{
+		"host": fmt.Sprintf("%s.%s.svc.cluster.local", mcpServer.Name, mcpServer.Namespace),
+	}
+
+	// Add traffic policy if specified
+	if drConfig.TrafficPolicy != nil {
+		trafficPolicy := map[string]interface{}{}
+
+		// Add TLS settings
+		if drConfig.TrafficPolicy.TLS != nil {
+			tls := map[string]interface{}{}
+			if drConfig.TrafficPolicy.TLS.Mode != "" {
+				tls["mode"] = drConfig.TrafficPolicy.TLS.Mode
+			} else {
+				tls["mode"] = "ISTIO_MUTUAL" // Default to mutual TLS
+			}
+			trafficPolicy["tls"] = tls
+		}
+
+		// Add connection pool settings
+		if drConfig.TrafficPolicy.ConnectionPool != nil {
+			connectionPool := map[string]interface{}{}
+
+			// Add TCP settings
+			if drConfig.TrafficPolicy.ConnectionPool.TCP != nil {
+				tcp := map[string]interface{}{}
+				if drConfig.TrafficPolicy.ConnectionPool.TCP.MaxConnections > 0 {
+					tcp["maxConnections"] = drConfig.TrafficPolicy.ConnectionPool.TCP.MaxConnections
+				}
+				if drConfig.TrafficPolicy.ConnectionPool.TCP.ConnectTimeout != "" {
+					tcp["connectTimeout"] = drConfig.TrafficPolicy.ConnectionPool.TCP.ConnectTimeout
+				}
+				if len(tcp) > 0 {
+					connectionPool["tcp"] = tcp
+				}
+			}
+
+			// Add HTTP settings
+			if drConfig.TrafficPolicy.ConnectionPool.HTTP != nil {
+				http := map[string]interface{}{}
+				if drConfig.TrafficPolicy.ConnectionPool.HTTP.HTTP1MaxPendingRequests > 0 {
+					http["http1MaxPendingRequests"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.HTTP1MaxPendingRequests
+				}
+				if drConfig.TrafficPolicy.ConnectionPool.HTTP.HTTP2MaxRequests > 0 {
+					http["http2MaxRequests"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.HTTP2MaxRequests
+				}
+				if drConfig.TrafficPolicy.ConnectionPool.HTTP.MaxRequestsPerConnection > 0 {
+					http["maxRequestsPerConnection"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.MaxRequestsPerConnection
+				}
+				if drConfig.TrafficPolicy.ConnectionPool.HTTP.MaxRetries > 0 {
+					http["maxRetries"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.MaxRetries
+				}
+				if drConfig.TrafficPolicy.ConnectionPool.HTTP.IdleTimeout != "" {
+					http["idleTimeout"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.IdleTimeout
+				}
+				if len(http) > 0 {
+					connectionPool["http"] = http
+				}
+			}
+
+			if len(connectionPool) > 0 {
+				trafficPolicy["connectionPool"] = connectionPool
+			}
+		}
+
+		// Add load balancer settings
+		if drConfig.TrafficPolicy.LoadBalancer != nil {
+			loadBalancer := map[string]interface{}{}
+			if drConfig.TrafficPolicy.LoadBalancer.Simple != "" {
+				loadBalancer["simple"] = drConfig.TrafficPolicy.LoadBalancer.Simple
+			} else {
+				loadBalancer["simple"] = "ROUND_ROBIN" // Default load balancing
+			}
+			trafficPolicy["loadBalancer"] = loadBalancer
+		}
+
+		if len(trafficPolicy) > 0 {
+			spec["trafficPolicy"] = trafficPolicy
+		}
+	}
+
+	// Create DestinationRule resource
+	destinationRule := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.istio.io/v1beta1",
+			"kind":       "DestinationRule",
+			"metadata": map[string]interface{}{
+				"name":      mcpServer.Name,
+				"namespace": mcpServer.Namespace,
+				"labels":    r.buildLabels(mcpServer),
+			},
+			"spec": spec,
+		},
+	}
+
+	return destinationRule
 }
