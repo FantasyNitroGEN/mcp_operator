@@ -162,7 +162,7 @@ endif
 
 .PHONY: install
 install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
-	$(KUSTOMIZE) build config/crd | kubectl apply -f -
+	$(KUSTOMIZE) build config/crd | kubectl apply --server-side -f -
 
 .PHONY: uninstall
 uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
@@ -171,11 +171,48 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
-	$(KUSTOMIZE) build config/default | kubectl apply -f -
+	$(KUSTOMIZE) build config/default | kubectl apply --server-side -f -
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+
+##@ OLM Bundle
+
+# Bundle image tag
+BUNDLE_IMG ?= mcp-operator-bundle:latest
+
+.PHONY: bundle
+bundle: manifests kustomize ## Generate bundle manifests and metadata, then validate generated files.
+	operator-sdk generate kustomize manifests -q
+	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
+	$(KUSTOMIZE) build config/manifests | operator-sdk generate bundle $(BUNDLE_GEN_FLAGS)
+	operator-sdk bundle validate ./bundle
+
+.PHONY: bundle-build
+bundle-build: ## Build the bundle image.
+	$(CONTAINER_TOOL) build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
+
+.PHONY: bundle-push
+bundle-push: ## Push the bundle image.
+	$(CONTAINER_TOOL) push $(BUNDLE_IMG)
+
+.PHONY: bundle-validate
+bundle-validate: ## Validate the bundle directory structure and manifests.
+	@echo "🔍 Validating OLM bundle structure..."
+	@if [ ! -d "bundle/manifests" ]; then echo "❌ bundle/manifests directory not found"; exit 1; fi
+	@if [ ! -d "bundle/metadata" ]; then echo "❌ bundle/metadata directory not found"; exit 1; fi
+	@if [ ! -f "bundle/manifests/mcp-operator.clusterserviceversion.yaml" ]; then echo "❌ ClusterServiceVersion not found"; exit 1; fi
+	@if [ ! -f "bundle/metadata/annotations.yaml" ]; then echo "❌ Bundle annotations not found"; exit 1; fi
+	@echo "✅ Bundle structure validation passed"
+	@echo "📦 Bundle contents:"
+	@ls -la bundle/manifests/
+	@echo "📋 Bundle metadata:"
+	@ls -la bundle/metadata/
+
+.PHONY: bundle-clean
+bundle-clean: ## Clean bundle directory
+	rm -rf bundle/
 
 ##@ Dependencies
 

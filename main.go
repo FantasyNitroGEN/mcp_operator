@@ -20,7 +20,7 @@ import (
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	controllers "github.com/FantasyNitroGEN/mcp_operator/controllers"
-	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/services"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -112,22 +112,61 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Создаем клиент для работы с MCP Registry
-	var registryClient *registry.Client
-	if registryURL != "" {
-		registryClient = registry.NewClientWithURL(registryURL)
-	} else {
-		registryClient = registry.NewClient()
+	// Initialize service dependencies for decomposed architecture
+	setupLog.Info("Initializing service dependencies")
+
+	// Create event recorder
+	eventRecorder := mgr.GetEventRecorderFor("mcp-operator")
+
+	// Initialize core services
+	kubernetesClientService := services.NewDefaultKubernetesClientService(mgr.GetClient())
+	retryService := services.NewDefaultRetryService()
+	eventService := services.NewDefaultEventService(eventRecorder)
+	statusService := services.NewDefaultStatusService(kubernetesClientService)
+	validationService := services.NewDefaultValidationService(kubernetesClientService)
+	resourceBuilderService := services.NewSimpleResourceBuilderService()
+
+	// Initialize registry service
+	registryService := services.NewDefaultRegistryService()
+
+	// Initialize deployment service
+	deploymentService := services.NewDefaultDeploymentService(
+		mgr.GetClient(),
+		resourceBuilderService,
+		kubernetesClientService,
+	)
+
+	// Setup MCPRegistry Controller with dependency injection
+	setupLog.Info("Setting up MCPRegistry controller")
+	if err = (&controllers.MCPRegistryReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		RegistryService:   registryService,
+		StatusService:     statusService,
+		ValidationService: validationService,
+		RetryService:      retryService,
+		EventService:      eventService,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "MCPRegistry")
+		os.Exit(1)
 	}
 
+	// Setup MCPServer Controller with dependency injection
+	setupLog.Info("Setting up MCPServer controller")
 	if err = (&controllers.MCPServerReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		RegistryClient: registryClient,
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		RegistryService:   registryService,
+		DeploymentService: deploymentService,
+		StatusService:     statusService,
+		ValidationService: validationService,
+		RetryService:      retryService,
+		EventService:      eventService,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPServer")
 		os.Exit(1)
 	}
+
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

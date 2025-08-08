@@ -214,7 +214,7 @@ spec:
 
 Примените конфигурацию:
 ```bash
-kubectl apply -f mcpserver.yaml
+kubectl apply --server-side -f mcpserver.yaml
 ```
 
 #### Развертывание с автоматическим обогащением из реестра
@@ -239,7 +239,7 @@ spec:
 
 Примените конфигурацию:
 ```bash
-kubectl apply -f mcpserver-registry.yaml
+kubectl apply --server-side -f mcpserver-registry.yaml
 ```
 
 Оператор автоматически:
