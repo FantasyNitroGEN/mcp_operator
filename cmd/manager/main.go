@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"os"
-	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -21,8 +19,7 @@ import (
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/controllers"
-	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
-	"github.com/FantasyNitroGEN/mcp_operator/pkg/sync"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/services"
 	mcpwebhook "github.com/FantasyNitroGEN/mcp_operator/pkg/webhook"
 	//+kubebuilder:scaffold:imports
 )
@@ -82,44 +79,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize registry client and syncer
-	registryClient := registry.NewClient()
-	syncer := sync.NewSyncer(registryClient, "servers")
-
-	// Start automatic registry polling in background
-	go func() {
-		setupLog.Info("Starting automatic registry polling")
-
-		// Initial sync on startup
-		ctx := context.Background()
-		if err := syncer.SyncAllServers(ctx); err != nil {
-			setupLog.Error(err, "Failed initial registry sync")
-		} else {
-			setupLog.Info("Initial registry sync completed successfully")
-		}
-
-		// Periodic sync every 30 minutes
-		ticker := time.NewTicker(30 * time.Minute)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				setupLog.Info("Starting periodic registry sync")
-				if err := syncer.SyncAllServers(ctx); err != nil {
-					setupLog.Error(err, "Failed periodic registry sync")
-				} else {
-					setupLog.Info("Periodic registry sync completed successfully")
-				}
-			}
-		}
-	}()
+	// Initialize services for MCPServerReconciler
+	// Create service instances with proper dependencies
+	kubernetesClient := services.NewDefaultKubernetesClientService(mgr.GetClient())
+	resourceBuilder := services.NewDefaultResourceBuilderService()
+	registryService := services.NewDefaultRegistryService()
+	statusService := services.NewDefaultStatusService(kubernetesClient)
+	validationService := services.NewDefaultValidationService(kubernetesClient)
+	retryService := services.NewDefaultRetryService()
+	eventService := services.NewDefaultEventService(mgr.GetEventRecorderFor("mcp-operator"))
+	deploymentService := services.NewDefaultDeploymentService(mgr.GetClient(), resourceBuilder, kubernetesClient)
+	autoUpdateService := services.NewDefaultAutoUpdateService(mgr.GetClient(), registryService, statusService, eventService)
+	cacheService := services.NewDefaultCacheService()
 
 	if err = (&controllers.MCPServerReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		RegistryClient: registryClient,
-		Syncer:         syncer,
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		RegistryService:   registryService,
+		DeploymentService: deploymentService,
+		StatusService:     statusService,
+		ValidationService: validationService,
+		RetryService:      retryService,
+		EventService:      eventService,
+		AutoUpdateService: autoUpdateService,
+		CacheService:      cacheService,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPServer")
 		os.Exit(1)

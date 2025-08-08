@@ -107,6 +107,15 @@ var (
 		},
 		[]string{"namespace", "name", "registry_name", "runtime_type", "image", "version"},
 	)
+
+	// RegistryReconciliations tracks registry reconciliation attempts
+	RegistryReconciliations = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "mcp_registry_reconciliations_total",
+			Help: "Total number of registry reconciliation attempts",
+		},
+		[]string{"name", "namespace"},
+	)
 )
 
 // init registers all metrics with the controller-runtime metrics registry
@@ -123,6 +132,7 @@ func init() {
 		CleanupOperations,
 		CleanupDuration,
 		MCPServerInfo,
+		RegistryReconciliations,
 	)
 }
 

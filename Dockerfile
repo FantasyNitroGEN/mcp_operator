@@ -23,7 +23,6 @@ COPY cmd/ cmd/
 COPY api/ api/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
-COPY internal/ internal/
 
 # Build with optimization flags and cache mount
 RUN --mount=type=cache,target=/go/pkg/mod \

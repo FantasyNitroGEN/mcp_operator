@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/metrics"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/services"
 )
 
@@ -62,8 +63,7 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Update metrics
-	// TODO: Add metrics when metrics package is updated
-	// metrics.RegistryReconciliations.WithLabelValues(registry.Name, registry.Namespace).Inc()
+	metrics.RegistryReconciliations.WithLabelValues(registry.Name, registry.Namespace).Inc()
 
 	// Validate registry specification
 	if err := r.ValidationService.ValidateRegistry(ctx, registry); err != nil {
@@ -78,7 +78,7 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
 	}
 
-	// Set registry phase to syncing
+	// Set the registry phase to syncing
 	registry.Status.Phase = mcpv1.MCPRegistryPhaseSyncing
 	r.StatusService.SetRegistryCondition(registry, mcpv1.MCPRegistryConditionSynced,
 		string(metav1.ConditionUnknown), "SyncInProgress", "Registry synchronization in progress")
@@ -141,7 +141,7 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if r.CacheService != nil {
 		cacheKey := fmt.Sprintf("registry:%s:%s", registry.Namespace, registry.Name)
 		r.CacheService.InvalidateRegistry(ctx, cacheKey)
-		// Also invalidate registry servers cache since registry was updated
+		// Also invalidate registry servers cache since the registry was updated
 		r.CacheService.InvalidateRegistryServers(ctx, registry.Name)
 	}
 
@@ -172,8 +172,8 @@ func (r *MCPRegistryReconciler) handleDeletion(ctx context.Context, logger logr.
 		logger.V(1).Info("Invalidated cache entries for deleted MCPRegistry", "cacheKey", cacheKey)
 	}
 
-	// Perform cleanup operations here if needed
-	// For example, cleanup cached registry data, notify dependent MCPServers, etc.
+	// Perform cleanup operations here if needed.
+	// For example, clean up cached registry data, notify dependent MCPServers, etc.
 
 	r.EventService.RecordNormal(registry, "Deleted", "MCPRegistry deleted successfully")
 
@@ -224,10 +224,10 @@ func (r *MCPRegistryReconciler) ListRegistries(ctx context.Context, namespace st
 
 // GetRegistryByNameIndexed retrieves a registry by name using field indexer for efficient lookup with caching
 func (r *MCPRegistryReconciler) GetRegistryByNameIndexed(ctx context.Context, name, namespace string) (*mcpv1.MCPRegistry, error) {
-	// Create cache key
+	// Create a cache key
 	cacheKey := fmt.Sprintf("registry:%s:%s", namespace, name)
 
-	// Try to get from cache first
+	// Try to get from the cache first
 	if r.CacheService != nil {
 		if cachedRegistry, found := r.CacheService.GetRegistry(ctx, cacheKey); found {
 			return cachedRegistry, nil
@@ -267,7 +267,7 @@ func (r *MCPRegistryReconciler) GetRegistryByNameIndexed(ctx context.Context, na
 
 // ListMCPServersByRegistry lists all MCPServers that use a specific registry using field indexer with caching
 func (r *MCPRegistryReconciler) ListMCPServersByRegistry(ctx context.Context, registryName, namespace string) (*mcpv1.MCPServerList, error) {
-	// Try to get from cache first
+	// Try to get from the cache first
 	if r.CacheService != nil {
 		if cachedServers, found := r.CacheService.GetRegistryServers(ctx, registryName); found {
 			// Filter by namespace if specified

@@ -51,11 +51,23 @@ func (s *DefaultStatusService) UpdateMCPRegistryStatus(ctx context.Context, regi
 	logger := log.FromContext(ctx).WithValues("mcpregistry", registry.Name, "namespace", registry.Namespace)
 	logger.V(1).Info("Updating MCPRegistry status")
 
-	// TODO: Implement MCPRegistry status update once code generation is fixed
-	// For now, just log the status update
-	logger.Info("MCPRegistry status update requested",
+	// Update last sync time if the registry is in a synced state
+	if registry.Status.Phase == mcpv1.MCPRegistryPhaseReady || registry.Status.Phase == mcpv1.MCPRegistryPhaseSyncing {
+		now := metav1.Now()
+		registry.Status.LastSyncTime = &now
+	}
+
+	// Update the status subresource
+	if err := s.kubernetesClient.UpdateStatus(ctx, registry); err != nil {
+		logger.Error(err, "Failed to update MCPRegistry status")
+		return fmt.Errorf("failed to update MCPRegistry status: %w", err)
+	}
+
+	logger.V(1).Info("Successfully updated MCPRegistry status",
 		"phase", registry.Status.Phase,
-		"availableServers", registry.Status.AvailableServers)
+		"availableServers", registry.Status.AvailableServers,
+		"lastSyncTime", registry.Status.LastSyncTime,
+		"message", registry.Status.Message)
 
 	return nil
 }

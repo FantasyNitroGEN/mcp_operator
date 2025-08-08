@@ -7,7 +7,10 @@ import (
 	"strings"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -544,30 +547,141 @@ func (v *DefaultValidationService) validateServiceQuota(ctx context.Context, mcp
 
 // getTenantCPUUsage gets current CPU usage for a tenant
 func (v *DefaultValidationService) getTenantCPUUsage(ctx context.Context, tenantID string, namespace string) (resource.Quantity, error) {
-	// TODO: Implement actual CPU usage calculation by querying pods with tenant label
-	// For now, return zero usage as a placeholder
-	return resource.Quantity{}, nil
+	logger := log.FromContext(ctx).WithValues("tenantID", tenantID, "namespace", namespace)
+	logger.V(1).Info("Getting tenant CPU usage")
+
+	// Create label selector for tenant pods
+	labelSelector := labels.SelectorFromSet(labels.Set{
+		"mcp.allbeone.io/tenant": tenantID,
+	})
+
+	// List pods with tenant label
+	podList := &corev1.PodList{}
+	listOpts := &client.ListOptions{
+		Namespace:     namespace,
+		LabelSelector: labelSelector,
+	}
+
+	if err := v.kubernetesClient.List(ctx, podList, listOpts); err != nil {
+		return resource.Quantity{}, fmt.Errorf("failed to list pods for tenant %s: %w", tenantID, err)
+	}
+
+	// Calculate total CPU usage from pod resource requests
+	totalCPU := resource.Quantity{}
+	for _, pod := range podList.Items {
+		// Only count running pods
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+
+		for _, container := range pod.Spec.Containers {
+			if cpuRequest, exists := container.Resources.Requests[corev1.ResourceCPU]; exists {
+				totalCPU.Add(cpuRequest)
+			}
+		}
+	}
+
+	logger.V(1).Info("Calculated tenant CPU usage", "totalCPU", totalCPU.String(), "podCount", len(podList.Items))
+	return totalCPU, nil
 }
 
 // getTenantMemoryUsage gets current Memory usage for a tenant
 func (v *DefaultValidationService) getTenantMemoryUsage(ctx context.Context, tenantID string, namespace string) (resource.Quantity, error) {
-	// TODO: Implement actual Memory usage calculation by querying pods with tenant label
-	// For now, return zero usage as a placeholder
-	return resource.Quantity{}, nil
+	logger := log.FromContext(ctx).WithValues("tenantID", tenantID, "namespace", namespace)
+	logger.V(1).Info("Getting tenant Memory usage")
+
+	// Create label selector for tenant pods
+	labelSelector := labels.SelectorFromSet(labels.Set{
+		"mcp.allbeone.io/tenant": tenantID,
+	})
+
+	// List pods with tenant label
+	podList := &corev1.PodList{}
+	listOpts := &client.ListOptions{
+		Namespace:     namespace,
+		LabelSelector: labelSelector,
+	}
+
+	if err := v.kubernetesClient.List(ctx, podList, listOpts); err != nil {
+		return resource.Quantity{}, fmt.Errorf("failed to list pods for tenant %s: %w", tenantID, err)
+	}
+
+	// Calculate total Memory usage from pod resource requests
+	totalMemory := resource.Quantity{}
+	for _, pod := range podList.Items {
+		// Only count running pods
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+
+		for _, container := range pod.Spec.Containers {
+			if memoryRequest, exists := container.Resources.Requests[corev1.ResourceMemory]; exists {
+				totalMemory.Add(memoryRequest)
+			}
+		}
+	}
+
+	logger.V(1).Info("Calculated tenant Memory usage", "totalMemory", totalMemory.String(), "podCount", len(podList.Items))
+	return totalMemory, nil
 }
 
 // getTenantPodCount gets current Pod count for a tenant
 func (v *DefaultValidationService) getTenantPodCount(ctx context.Context, tenantID string, namespace string) (int32, error) {
-	// TODO: Implement actual Pod count calculation by querying pods with tenant label
-	// For now, return zero count as a placeholder
-	return 0, nil
+	logger := log.FromContext(ctx).WithValues("tenantID", tenantID, "namespace", namespace)
+	logger.V(1).Info("Getting tenant Pod count")
+
+	// Create label selector for tenant pods
+	labelSelector := labels.SelectorFromSet(labels.Set{
+		"mcp.allbeone.io/tenant": tenantID,
+	})
+
+	// List pods with tenant label
+	podList := &corev1.PodList{}
+	listOpts := &client.ListOptions{
+		Namespace:     namespace,
+		LabelSelector: labelSelector,
+	}
+
+	if err := v.kubernetesClient.List(ctx, podList, listOpts); err != nil {
+		return 0, fmt.Errorf("failed to list pods for tenant %s: %w", tenantID, err)
+	}
+
+	// Count running pods
+	runningPodCount := int32(0)
+	for _, pod := range podList.Items {
+		if pod.Status.Phase == corev1.PodRunning {
+			runningPodCount++
+		}
+	}
+
+	logger.V(1).Info("Calculated tenant Pod count", "runningPods", runningPodCount, "totalPods", len(podList.Items))
+	return runningPodCount, nil
 }
 
 // getTenantServiceCount gets current Service count for a tenant
 func (v *DefaultValidationService) getTenantServiceCount(ctx context.Context, tenantID string, namespace string) (int32, error) {
-	// TODO: Implement actual Service count calculation by querying services with tenant label
-	// For now, return zero count as a placeholder
-	return 0, nil
+	logger := log.FromContext(ctx).WithValues("tenantID", tenantID, "namespace", namespace)
+	logger.V(1).Info("Getting tenant Service count")
+
+	// Create label selector for tenant services
+	labelSelector := labels.SelectorFromSet(labels.Set{
+		"mcp.allbeone.io/tenant": tenantID,
+	})
+
+	// List services with tenant label
+	serviceList := &corev1.ServiceList{}
+	listOpts := &client.ListOptions{
+		Namespace:     namespace,
+		LabelSelector: labelSelector,
+	}
+
+	if err := v.kubernetesClient.List(ctx, serviceList, listOpts); err != nil {
+		return 0, fmt.Errorf("failed to list services for tenant %s: %w", tenantID, err)
+	}
+
+	serviceCount := int32(len(serviceList.Items))
+	logger.V(1).Info("Calculated tenant Service count", "serviceCount", serviceCount)
+	return serviceCount, nil
 }
 
 // Helper functions

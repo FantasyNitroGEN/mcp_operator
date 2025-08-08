@@ -1104,7 +1104,7 @@ func (r *MCPServerBackupReconciler) handleScheduledBackup(ctx context.Context, l
 
 	now := time.Now()
 
-	// Calculate next schedule time
+	// Calculate the next schedule time
 	nextTime := schedule.Next(now)
 	backup.Status.NextScheduleTime = &metav1.Time{Time: nextTime}
 
