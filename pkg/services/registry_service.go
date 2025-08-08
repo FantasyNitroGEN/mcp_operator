@@ -115,6 +115,51 @@ func (r *DefaultRegistryService) EnrichMCPServer(ctx context.Context, mcpServer 
 	return nil
 }
 
+// ForceEnrichMCPServer enriches MCPServer with registry data, bypassing "already enriched" check
+func (r *DefaultRegistryService) ForceEnrichMCPServer(ctx context.Context, mcpServer *mcpv1.MCPServer, registryName string) error {
+	logger := log.FromContext(ctx).WithValues("mcpserver", mcpServer.Name, "registry", registryName)
+	logger.Info("Force enriching MCPServer with registry data")
+
+	// Fetch server specification (always fetch, no skip check)
+	spec, err := r.FetchServerSpec(ctx, registryName, mcpServer.Spec.Registry.Name)
+	if err != nil {
+		return fmt.Errorf("failed to fetch server spec for force enrichment: %w", err)
+	}
+
+	// Always enrich registry information (overwrite existing values)
+	mcpServer.Spec.Registry.Version = spec.Version
+	mcpServer.Spec.Registry.Description = spec.Description
+	mcpServer.Spec.Registry.Repository = spec.Repository
+	mcpServer.Spec.Registry.License = spec.License
+	mcpServer.Spec.Registry.Author = spec.Author
+	mcpServer.Spec.Registry.Keywords = spec.Keywords
+	mcpServer.Spec.Registry.Capabilities = spec.Capabilities
+
+	// Always enrich runtime information (overwrite existing values)
+	mcpServer.Spec.Runtime.Type = spec.Runtime.Type
+	mcpServer.Spec.Runtime.Image = spec.Runtime.Image
+	mcpServer.Spec.Runtime.Command = spec.Runtime.Command
+	mcpServer.Spec.Runtime.Args = spec.Runtime.Args
+
+	// Always enrich environment variables (overwrite existing values)
+	if mcpServer.Spec.Runtime.Env == nil {
+		mcpServer.Spec.Runtime.Env = make(map[string]string)
+	}
+	// Clear existing env vars and set new ones
+	for k := range mcpServer.Spec.Runtime.Env {
+		delete(mcpServer.Spec.Runtime.Env, k)
+	}
+	for k, v := range spec.Runtime.Env {
+		mcpServer.Spec.Runtime.Env[k] = v
+	}
+
+	logger.Info("Successfully force enriched MCPServer with registry data",
+		"version", spec.Version,
+		"image", spec.Runtime.Image)
+
+	return nil
+}
+
 // SyncRegistry synchronizes registry data
 func (r *DefaultRegistryService) SyncRegistry(ctx context.Context, registry *mcpv1.MCPRegistry) error {
 	logger := log.FromContext(ctx).WithValues("registry", registry.Name)

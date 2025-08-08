@@ -38,6 +38,8 @@ type MCPServerReconciler struct {
 	ValidationService services.ValidationService
 	RetryService      services.RetryService
 	EventService      services.EventService
+	AutoUpdateService services.AutoUpdateService
+	CacheService      services.CacheService
 }
 
 // +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpservers,verbs=get;list;watch;create;update;patch;delete
@@ -199,6 +201,16 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
+		// Invalidate cache after update
+		if r.CacheService != nil {
+			cacheKey := fmt.Sprintf("mcpserver:%s:%s", mcpServer.Namespace, mcpServer.Name)
+			r.CacheService.InvalidateMCPServer(ctx, cacheKey)
+			// Also invalidate registry servers cache since server was updated
+			if mcpServer.Spec.Registry.Name != "" {
+				r.CacheService.InvalidateRegistryServers(ctx, mcpServer.Spec.Registry.Name)
+			}
+		}
+
 		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRegistryFetched,
 			string(metav1.ConditionTrue), "RegistryEnrichmentSuccessful", "Successfully enriched MCPServer with registry data")
 		r.EventService.RecordNormal(mcpServer, "RegistryEnrichmentSuccessful", "Successfully enriched MCPServer with registry data")
@@ -328,6 +340,17 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 func (r *MCPServerReconciler) handleDeletion(ctx context.Context, logger logr.Logger, mcpServer *mcpv1.MCPServer) (ctrl.Result, error) {
 	logger.Info("Handling MCPServer deletion")
 
+	// Invalidate cache entries before deletion
+	if r.CacheService != nil {
+		cacheKey := fmt.Sprintf("mcpserver:%s:%s", mcpServer.Namespace, mcpServer.Name)
+		r.CacheService.InvalidateMCPServer(ctx, cacheKey)
+		// Also invalidate registry servers cache since server is being deleted
+		if mcpServer.Spec.Registry.Name != "" {
+			r.CacheService.InvalidateRegistryServers(ctx, mcpServer.Spec.Registry.Name)
+		}
+		logger.V(1).Info("Invalidated cache entries for deleted MCPServer", "cacheKey", cacheKey)
+	}
+
 	// Set phase to terminating
 	mcpServer.Status.Phase = mcpv1.MCPServerPhaseTerminating
 	r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
@@ -361,4 +384,86 @@ func (r *MCPServerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			MaxConcurrentReconciles: 5, // Higher concurrency for deployment operations
 		}).
 		Complete(r)
+}
+
+// GetMCPServerByNameIndexed retrieves an MCPServer by name using field indexer for efficient lookup with caching
+func (r *MCPServerReconciler) GetMCPServerByNameIndexed(ctx context.Context, name, namespace string) (*mcpv1.MCPServer, error) {
+	// Create cache key
+	cacheKey := fmt.Sprintf("mcpserver:%s:%s", namespace, name)
+
+	// Try to get from cache first
+	if r.CacheService != nil {
+		if cachedServer, found := r.CacheService.GetMCPServer(ctx, cacheKey); found {
+			return cachedServer, nil
+		}
+	}
+
+	mcpServerList := &mcpv1.MCPServerList{}
+	listOpts := []client.ListOption{
+		client.MatchingFields{"metadata.name": name},
+	}
+
+	if namespace != "" {
+		listOpts = append(listOpts, client.InNamespace(namespace))
+	}
+
+	if err := r.List(ctx, mcpServerList, listOpts...); err != nil {
+		return nil, err
+	}
+
+	if len(mcpServerList.Items) == 0 {
+		return nil, fmt.Errorf("MCPServer %s not found in namespace %s", name, namespace)
+	}
+
+	if len(mcpServerList.Items) > 1 {
+		return nil, fmt.Errorf("multiple MCPServers found with name %s in namespace %s", name, namespace)
+	}
+
+	server := &mcpServerList.Items[0]
+
+	// Cache the result for 5 minutes (shorter TTL for servers as they change more frequently)
+	if r.CacheService != nil {
+		r.CacheService.SetMCPServer(ctx, cacheKey, server, 5*time.Minute)
+	}
+
+	return server, nil
+}
+
+// ListMCPServersByRegistryIndexed lists all MCPServers that use a specific registry using field indexer
+func (r *MCPServerReconciler) ListMCPServersByRegistryIndexed(ctx context.Context, registryName, namespace string) (*mcpv1.MCPServerList, error) {
+	mcpServerList := &mcpv1.MCPServerList{}
+	listOpts := []client.ListOption{
+		client.MatchingFields{"spec.registry.name": registryName},
+	}
+
+	if namespace != "" {
+		listOpts = append(listOpts, client.InNamespace(namespace))
+	}
+
+	if err := r.List(ctx, mcpServerList, listOpts...); err != nil {
+		return nil, err
+	}
+
+	return mcpServerList, nil
+}
+
+// ListMCPServersEfficient lists MCPServers with optional filtering using indexed fields
+func (r *MCPServerReconciler) ListMCPServersEfficient(ctx context.Context, namespace string, registryName string) (*mcpv1.MCPServerList, error) {
+	mcpServerList := &mcpv1.MCPServerList{}
+	listOpts := []client.ListOption{}
+
+	// Use indexed field if registry name is specified
+	if registryName != "" {
+		listOpts = append(listOpts, client.MatchingFields{"spec.registry.name": registryName})
+	}
+
+	if namespace != "" {
+		listOpts = append(listOpts, client.InNamespace(namespace))
+	}
+
+	if err := r.List(ctx, mcpServerList, listOpts...); err != nil {
+		return nil, err
+	}
+
+	return mcpServerList, nil
 }

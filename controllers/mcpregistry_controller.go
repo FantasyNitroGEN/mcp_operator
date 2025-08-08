@@ -30,6 +30,7 @@ type MCPRegistryReconciler struct {
 	ValidationService services.ValidationService
 	RetryService      services.RetryService
 	EventService      services.EventService
+	CacheService      services.CacheService
 }
 
 // +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpregistries,verbs=get;list;watch;create;update;patch;delete
@@ -136,6 +137,14 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	// Invalidate cache after status update to ensure fresh data on next access
+	if r.CacheService != nil {
+		cacheKey := fmt.Sprintf("registry:%s:%s", registry.Namespace, registry.Name)
+		r.CacheService.InvalidateRegistry(ctx, cacheKey)
+		// Also invalidate registry servers cache since registry was updated
+		r.CacheService.InvalidateRegistryServers(ctx, registry.Name)
+	}
+
 	// Calculate next sync time
 	syncInterval := time.Hour * 24 // Default sync interval
 	if registry.Spec.SyncInterval != nil {
@@ -153,6 +162,15 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // handleDeletion handles the deletion of MCPRegistry
 func (r *MCPRegistryReconciler) handleDeletion(ctx context.Context, logger logr.Logger, registry *mcpv1.MCPRegistry) (ctrl.Result, error) {
 	logger.Info("Handling MCPRegistry deletion")
+
+	// Invalidate cache entries before deletion
+	if r.CacheService != nil {
+		cacheKey := fmt.Sprintf("registry:%s:%s", registry.Namespace, registry.Name)
+		r.CacheService.InvalidateRegistry(ctx, cacheKey)
+		// Also invalidate registry servers cache
+		r.CacheService.InvalidateRegistryServers(ctx, registry.Name)
+		logger.V(1).Info("Invalidated cache entries for deleted MCPRegistry", "cacheKey", cacheKey)
+	}
 
 	// Perform cleanup operations here if needed
 	// For example, cleanup cached registry data, notify dependent MCPServers, etc.
@@ -202,6 +220,89 @@ func (r *MCPRegistryReconciler) ListRegistries(ctx context.Context, namespace st
 	}
 
 	return registryList, nil
+}
+
+// GetRegistryByNameIndexed retrieves a registry by name using field indexer for efficient lookup with caching
+func (r *MCPRegistryReconciler) GetRegistryByNameIndexed(ctx context.Context, name, namespace string) (*mcpv1.MCPRegistry, error) {
+	// Create cache key
+	cacheKey := fmt.Sprintf("registry:%s:%s", namespace, name)
+
+	// Try to get from cache first
+	if r.CacheService != nil {
+		if cachedRegistry, found := r.CacheService.GetRegistry(ctx, cacheKey); found {
+			return cachedRegistry, nil
+		}
+	}
+
+	registryList := &mcpv1.MCPRegistryList{}
+	listOpts := []client.ListOption{
+		client.MatchingFields{"metadata.name": name},
+	}
+
+	if namespace != "" {
+		listOpts = append(listOpts, client.InNamespace(namespace))
+	}
+
+	if err := r.List(ctx, registryList, listOpts...); err != nil {
+		return nil, err
+	}
+
+	if len(registryList.Items) == 0 {
+		return nil, fmt.Errorf("registry %s not found in namespace %s", name, namespace)
+	}
+
+	if len(registryList.Items) > 1 {
+		return nil, fmt.Errorf("multiple registries found with name %s in namespace %s", name, namespace)
+	}
+
+	registry := &registryList.Items[0]
+
+	// Cache the result for 10 minutes
+	if r.CacheService != nil {
+		r.CacheService.SetRegistry(ctx, cacheKey, registry, 10*time.Minute)
+	}
+
+	return registry, nil
+}
+
+// ListMCPServersByRegistry lists all MCPServers that use a specific registry using field indexer with caching
+func (r *MCPRegistryReconciler) ListMCPServersByRegistry(ctx context.Context, registryName, namespace string) (*mcpv1.MCPServerList, error) {
+	// Try to get from cache first
+	if r.CacheService != nil {
+		if cachedServers, found := r.CacheService.GetRegistryServers(ctx, registryName); found {
+			// Filter by namespace if specified
+			if namespace != "" {
+				filteredServers := make([]mcpv1.MCPServer, 0)
+				for _, server := range cachedServers {
+					if server.Namespace == namespace {
+						filteredServers = append(filteredServers, server)
+					}
+				}
+				return &mcpv1.MCPServerList{Items: filteredServers}, nil
+			}
+			return &mcpv1.MCPServerList{Items: cachedServers}, nil
+		}
+	}
+
+	mcpServerList := &mcpv1.MCPServerList{}
+	listOpts := []client.ListOption{
+		client.MatchingFields{"spec.registry.name": registryName},
+	}
+
+	if namespace != "" {
+		listOpts = append(listOpts, client.InNamespace(namespace))
+	}
+
+	if err := r.List(ctx, mcpServerList, listOpts...); err != nil {
+		return nil, err
+	}
+
+	// Cache the result for 5 minutes (shorter TTL for server lists as they change more frequently)
+	if r.CacheService != nil && len(mcpServerList.Items) > 0 {
+		r.CacheService.SetRegistryServers(ctx, registryName, mcpServerList.Items, 5*time.Minute)
+	}
+
+	return mcpServerList, nil
 }
 
 // TriggerRegistrySync manually triggers a registry sync

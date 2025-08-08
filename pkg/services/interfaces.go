@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"time"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
@@ -20,6 +21,9 @@ type RegistryService interface {
 
 	// EnrichMCPServer enriches MCPServer with registry data
 	EnrichMCPServer(ctx context.Context, mcpServer *mcpv1.MCPServer, registryName string) error
+
+	// ForceEnrichMCPServer enriches MCPServer with registry data, bypassing "already enriched" check
+	ForceEnrichMCPServer(ctx context.Context, mcpServer *mcpv1.MCPServer, registryName string) error
 
 	// SyncRegistry synchronizes registry data
 	SyncRegistry(ctx context.Context, registry *mcpv1.MCPRegistry) error
@@ -146,4 +150,22 @@ type EventService interface {
 
 	// RecordNormal records a normal event
 	RecordNormal(obj client.Object, reason, message string)
+}
+
+// AutoUpdateService defines the interface for auto-updating server templates
+type AutoUpdateService interface {
+	// CheckForUpdates checks if any MCPServers need updates from registry
+	CheckForUpdates(ctx context.Context) error
+
+	// UpdateServerFromTemplate updates a specific MCPServer with latest template data
+	UpdateServerFromTemplate(ctx context.Context, mcpServer *mcpv1.MCPServer) (bool, error)
+
+	// IsUpdateRequired checks if an MCPServer needs updating based on registry template
+	IsUpdateRequired(ctx context.Context, mcpServer *mcpv1.MCPServer) (bool, *registry.MCPServerSpec, error)
+
+	// StartPeriodicSync starts periodic synchronization of templates
+	StartPeriodicSync(ctx context.Context, interval time.Duration) error
+
+	// StopPeriodicSync stops periodic synchronization
+	StopPeriodicSync()
 }
