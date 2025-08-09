@@ -81,8 +81,11 @@ func main() {
 
 	// Configure Go runtime optimizations
 	if gogcPercent != 100 {
-		os.Setenv("GOGC", fmt.Sprintf("%d", gogcPercent))
-		setupLog.Info("GOGC configured", "percentage", gogcPercent)
+		if err := os.Setenv("GOGC", fmt.Sprintf("%d", gogcPercent)); err != nil {
+			setupLog.Error(err, "Failed to set GOGC environment variable", "percentage", gogcPercent)
+		} else {
+			setupLog.Info("GOGC configured", "percentage", gogcPercent)
+		}
 	}
 
 	// Start pprof server for profiling (only in development)

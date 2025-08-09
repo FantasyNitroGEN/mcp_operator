@@ -149,8 +149,51 @@ mcp registry list
 # Поиск серверов по ключевому слову
 mcp registry search filesystem
 
+# Просмотр детальной спецификации сервера
+mcp registry inspect filesystem
+
+# Просмотр спецификации в JSON формате
+mcp registry inspect filesystem --format json
+```
+
+Команда `inspect` позволяет просмотреть полную спецификацию MCP сервера из реестра, включая описание, версию, автора, runtime конфигурацию, переменные окружения, возможности и схему конфигурации. Пример вывода:
+
+```yaml
+name: filesystem
+version: ""
+description: The MCP server is allowed to access these paths
+repository: ""
+license: ""
+author: ""
+homepage: ""
+keywords: []
+runtime:
+    type: ""
+    image: ""
+    command: []
+    args: []
+    env: {}
+config:
+    schema: []
+    required: []
+    properties: {}
+capabilities: []
+environment: {}
+templatedigest: 1855e7e6c00a6984093b1a9ea047c5c2f00af160c5921a5db2460bc0a1837565
+```
+
+```bash
 # Список с JSON выводом
 mcp registry list --format json
+
+# Обновить кэш реестра (синхронизация с удаленным реестром)
+mcp registry refresh
+
+# Обновить конкретный реестр по имени
+mcp registry refresh --name myregistry
+
+# Обновить реестр в определенном namespace
+mcp registry refresh --namespace mcp-system
 ```
 
 #### Развертывание серверов
@@ -191,6 +234,28 @@ mcp status filesystem-server --output yaml
 mcp status filesystem-server --watch
 ```
 
+#### Просмотр логов серверов
+
+```bash
+# Просмотреть логи сервера
+mcp server logs filesystem-server
+
+# Просмотреть логи из определенного namespace
+mcp server logs filesystem-server --namespace mcp-servers
+
+# Следить за логами в реальном времени (как kubectl logs -f)
+mcp server logs filesystem-server --follow
+
+# Показать последние 50 строк логов
+mcp server logs filesystem-server --tail 50
+
+# Указать конкретный контейнер (если в поде несколько контейнеров)
+mcp server logs filesystem-server --container mcp-server
+
+# Комбинированное использование флагов
+mcp server logs filesystem-server --namespace mcp-servers --follow --tail 100
+```
+
 #### Удаление серверов
 
 ```bash
@@ -216,8 +281,11 @@ mcp version
 # Помощь по командам
 mcp --help
 mcp registry --help
+mcp registry refresh --help
 mcp deploy --help
 mcp status --help
+mcp server --help
+mcp server logs --help
 mcp delete --help
 ```
 

@@ -318,7 +318,7 @@ func (d *DefaultDeploymentService) CreateOrUpdateVirtualService(ctx context.Cont
 
 	// Check if Istio is enabled for this MCPServer
 	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.VirtualService == nil {
-		return nil, fmt.Errorf("Istio VirtualService configuration is not available or not enabled")
+		return nil, fmt.Errorf("istio VirtualService configuration is not available or not enabled")
 	}
 
 	// Check if Istio CRDs are available
@@ -328,7 +328,7 @@ func (d *DefaultDeploymentService) CreateOrUpdateVirtualService(ctx context.Cont
 	}
 	if !available {
 		logger.Info("Istio CRDs not available, skipping VirtualService creation")
-		return nil, fmt.Errorf("Istio CRDs are not available in the cluster")
+		return nil, fmt.Errorf("istio CRDs are not available in the cluster")
 	}
 
 	// Build the desired VirtualService
@@ -377,7 +377,7 @@ func (d *DefaultDeploymentService) CreateOrUpdateDestinationRule(ctx context.Con
 
 	// Check if Istio is enabled for this MCPServer
 	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.DestinationRule == nil {
-		return nil, fmt.Errorf("Istio DestinationRule configuration is not available or not enabled")
+		return nil, fmt.Errorf("istio DestinationRule configuration is not available or not enabled")
 	}
 
 	// Check if Istio CRDs are available
@@ -387,7 +387,7 @@ func (d *DefaultDeploymentService) CreateOrUpdateDestinationRule(ctx context.Con
 	}
 	if !available {
 		logger.Info("Istio CRDs not available, skipping DestinationRule creation")
-		return nil, fmt.Errorf("Istio CRDs are not available in the cluster")
+		return nil, fmt.Errorf("istio CRDs are not available in the cluster")
 	}
 
 	// Build the desired DestinationRule
