@@ -41,11 +41,22 @@ jobs:
 
       - name: Install MCP Operator (Helm)
         run: |
-          helm upgrade --install mcp-operator ./charts/mcp-operator \
-            --namespace default --create-namespace \
-            --set image.repository=mcp_operator \
-            --set image.tag=dev \
-            --set image.pullPolicy=IfNotPresent
+          set -e
+          if [ -d ./helm/mcp-operator ]; then
+            helm upgrade --install mcp-operator ./helm/mcp-operator \
+              --namespace default --create-namespace \
+              --set image.repository=mcp_operator \
+              --set image.tag=dev \
+              --set image.pullPolicy=IfNotPresent
+          else
+            helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
+            helm repo update
+            helm upgrade --install mcp-operator mcp-operator/mcp-operator \
+              --namespace default --create-namespace \
+              --set image.repository=mcp_operator \
+              --set image.tag=dev \
+              --set image.pullPolicy=IfNotPresent
+          fi
           kubectl -n default rollout status deploy/mcp-operator --timeout=300s
 
       - name: Build CLI
