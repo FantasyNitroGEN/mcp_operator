@@ -1,0 +1,97 @@
+name: e2e-kind
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+jobs:
+  e2e-postgres:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          check-latest: true
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: mcp-e2e
+
+      - name: Build operator image (no push)
+        run: |
+          DOCKER_BUILDKIT=1 docker buildx build \
+            --load --platform linux/amd64 \
+            -t mcp_operator:dev .
+
+      - name: Load image into kind
+        run: kind load docker-image mcp_operator:dev --name mcp-e2e
+
+      - name: Install MCP Operator (Helm)
+        run: |
+          helm upgrade --install mcp-operator ./charts/mcp-operator \
+            --namespace default --create-namespace \
+            --set image.repository=mcp_operator \
+            --set image.tag=dev \
+            --set image.pullPolicy=IfNotPresent
+          kubectl -n default rollout status deploy/mcp-operator --timeout=300s
+
+      - name: Build CLI
+        run: go build -o ./bin/mcp ./cmd/mcp
+
+      # --- Postgres in-cluster (битнами чарт) ---
+      - name: Add Bitnami repo
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+
+      - name: Install PostgreSQL
+        run: |
+          helm upgrade --install pg bitnami/postgresql \
+            --namespace default \
+            --set auth.postgresPassword=postgres \
+            --set auth.database=app \
+            --set primary.resources.requests.cpu=50m \
+            --set primary.resources.requests.memory=128Mi
+          kubectl -n default rollout status statefulset/pg-postgresql --timeout=300s
+
+      - name: Compute POSTGRES_URL
+        id: pgurl
+        shell: bash
+        run: |
+          URL="postgresql://postgres:postgres@pg-postgresql.default.svc.cluster.local:5432/app?sslmode=disable"
+          echo "URL=${URL}" >> $GITHUB_OUTPUT
+
+      # --- Deploy MCP Postgres server from registry ---
+      - name: Deploy MCP server (postgres) from registry
+        run: |
+          ./bin/mcp server deploy postgres \
+            --namespace default \
+            --replicas 1 \
+            --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}' \
+            --wait --timeout 300s
+
+      - name: Validate status
+        run: |
+          kubectl -n default get mcpservers -o wide
+          kubectl -n default get pods -l app.kubernetes.io/instance=postgres
+          kubectl -n default wait mcpserver/postgres --for=condition=Ready --timeout=120s || true
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n default get all
+          kubectl -n default describe mcpserver postgres || true
+          kubectl -n default logs deploy/mcp-operator || true

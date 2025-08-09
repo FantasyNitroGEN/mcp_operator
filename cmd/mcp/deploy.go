@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -30,6 +31,9 @@ func newDeployCmd() *cobra.Command {
 		minReplicas int32
 		maxReplicas int32
 		targetCPU   int32
+		// Environment variable flags
+		envVars        []string
+		envFromSecrets []string
 	)
 
 	cmd := &cobra.Command{
@@ -47,6 +51,15 @@ enrich with registry data and deploy as a running server.`,
   # Deploy with custom replicas
   mcp deploy filesystem-server --replicas 3
 
+  # Deploy with environment variables
+  mcp deploy postgres --env POSTGRES_URL=postgresql://user:pass@host:5432/db --env DEBUG=true
+
+  # Deploy with environment variables from secrets
+  mcp deploy postgres --env-from-secret postgres-credentials --env-from-secret app-config
+
+  # Deploy with both direct env vars and secret references
+  mcp deploy postgres --env POSTGRES_URL=postgresql://host:5432/db --env-from-secret postgres-secret
+
   # Deploy with autoscaling enabled
   mcp deploy filesystem-server --autoscale --min 1 --max 5 --target-cpu 70
 
@@ -60,7 +73,7 @@ enrich with registry data and deploy as a running server.`,
   mcp deploy filesystem-server --wait --wait-timeout 5m`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeploy(args[0], namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU)
+			return runDeploy(args[0], namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU, envVars, envFromSecrets)
 		},
 	}
 
@@ -78,10 +91,14 @@ enrich with registry data and deploy as a running server.`,
 	cmd.Flags().Int32Var(&maxReplicas, "max", 10, "Maximum number of replicas for autoscaling")
 	cmd.Flags().Int32Var(&targetCPU, "target-cpu", 80, "Target CPU utilization percentage for autoscaling")
 
+	// Environment variable flags
+	cmd.Flags().StringArrayVar(&envVars, "env", []string{}, "Environment variables in KEY=VALUE format (can be repeated)")
+	cmd.Flags().StringArrayVar(&envFromSecrets, "env-from-secret", []string{}, "Load environment variables from secret (can be repeated)")
+
 	return cmd
 }
 
-func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32) error {
+func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string) error {
 	// First, verify the server exists in the registry
 	fmt.Printf("Verifying server '%s' exists in registry...\n", serverName)
 
@@ -96,6 +113,26 @@ func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, 
 	}
 
 	fmt.Printf("✓ Server '%s' found in registry\n", serverName)
+
+	// Parse environment variables
+	envMap := make(map[string]string)
+	for _, envVar := range envVars {
+		parts := strings.SplitN(envVar, "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid environment variable format '%s', expected KEY=VALUE", envVar)
+		}
+		envMap[parts[0]] = parts[1]
+	}
+
+	// Parse envFrom secrets
+	var envFromSources []mcpv1.EnvFromSource
+	for _, secretName := range envFromSecrets {
+		envFromSources = append(envFromSources, mcpv1.EnvFromSource{
+			SecretRef: &mcpv1.SecretEnvSource{
+				Name: secretName,
+			},
+		})
+	}
 
 	// Create MCPServer resource
 	mcpServer := &mcpv1.MCPServer{
@@ -119,7 +156,9 @@ func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, 
 			},
 			Runtime: mcpv1.MCPRuntimeSpec{
 				Type: "docker", // Default to docker, will be enriched from registry
+				Env:  envMap,
 			},
+			EnvFrom: envFromSources,
 		},
 	}
 
@@ -221,9 +260,7 @@ spec:
   registry:
     name: %s
   runtime:
-    type: %s
-  replicas: %d
-`,
+    type: %s`,
 		"mcp.allbeone.io/v1",
 		"MCPServer",
 		mcpServer.Name,
@@ -236,8 +273,37 @@ spec:
 		mcpServer.Annotations["mcp.allbeone.io/deployed-at"],
 		mcpServer.Spec.Registry.Name,
 		mcpServer.Spec.Runtime.Type,
-		*mcpServer.Spec.Replicas,
 	)
+
+	// Print environment variables if present
+	if len(mcpServer.Spec.Runtime.Env) > 0 {
+		fmt.Printf("\n    env:")
+		for key, value := range mcpServer.Spec.Runtime.Env {
+			fmt.Printf("\n      %s: %s", key, value)
+		}
+	}
+
+	// Print envFrom sources if present
+	if len(mcpServer.Spec.EnvFrom) > 0 {
+		fmt.Printf("\n  envFrom:")
+		for _, envFrom := range mcpServer.Spec.EnvFrom {
+			if envFrom.SecretRef != nil {
+				fmt.Printf("\n  - secretRef:")
+				fmt.Printf("\n      name: %s", envFrom.SecretRef.Name)
+			}
+			if envFrom.ConfigMapRef != nil {
+				fmt.Printf("\n  - configMapRef:")
+				fmt.Printf("\n      name: %s", envFrom.ConfigMapRef.Name)
+			}
+		}
+	}
+
+	// Print replicas
+	if mcpServer.Spec.Replicas != nil {
+		fmt.Printf("\n  replicas: %d", *mcpServer.Spec.Replicas)
+	}
+
+	fmt.Println()
 	return nil
 }
 
