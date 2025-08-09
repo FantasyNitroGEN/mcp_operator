@@ -31,7 +31,6 @@ jobs:
         id: image
         run: |
           echo "IMAGE_NAME=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
-          echo "CACHE_IMAGE=fantasynitrogen/mcp_operator" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
@@ -48,19 +47,36 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Generate tags
         id: meta
-        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
+        run: |
+          IMAGE_BASE="${{ env.REGISTRY }}/${{ steps.image.outputs.IMAGE_NAME }}"
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # PR: pr-<number> and pr-<number>-<shortsha>
+            PR_NUMBER="${{ github.event.number }}"
+            TAGS="${IMAGE_BASE}:pr-${PR_NUMBER}"
+            TAGS="${TAGS},$IMAGE_BASE:pr-${PR_NUMBER}-${SHORT_SHA}"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            # Tag: <git tag>, sha-<shortsha>, latest
+            TAG_NAME="${{ github.ref_name }}"
+            TAGS="${IMAGE_BASE}:${TAG_NAME}"
+            TAGS="${TAGS},$IMAGE_BASE:sha-${SHORT_SHA}"
+            TAGS="${TAGS},$IMAGE_BASE:latest"
+          elif [[ "${{ github.ref_name }}" == "main" ]]; then
+            # Main: latest and sha-<shortsha>
+            TAGS="${IMAGE_BASE}:latest"
+            TAGS="${TAGS},$IMAGE_BASE:sha-${SHORT_SHA}"
+          else
+            # Other branches: branch name and sha-<shortsha>
+            BRANCH_NAME=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
+            TAGS="${IMAGE_BASE}:${BRANCH_NAME}"
+            TAGS="${TAGS},$IMAGE_BASE:sha-${SHORT_SHA}"
+          fi
+          
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "Generated tags: ${TAGS}"
 
       - name: Build and push Docker image
         id: build
@@ -70,15 +86,18 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            org.opencontainers.image.title=${{ github.repository }}
+            org.opencontainers.image.description=MCP Kubernetes Operator
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             BUILDKIT_INLINE_CACHE=1
-          cache-from: |
-            type=gha,scope=${{ github.workflow }}
-            type=registry,ref=${{ env.REGISTRY }}/${{ steps.image.outputs.CACHE_IMAGE }}:buildcache
-          cache-to: |
-            type=gha,scope=${{ github.workflow }},mode=max
-            type=registry,ref=${{ env.REGISTRY }}/${{ steps.image.outputs.CACHE_IMAGE }}:buildcache,mode=max
+          cache-from: ${{ github.event_name == 'pull_request' && 'type=gha,scope=pr' || format('type=gha,scope={0}\ntype=registry,ref={1}/{2}:buildcache', github.workflow, env.REGISTRY, steps.image.outputs.IMAGE_NAME) }}
+          cache-to: ${{ github.event_name == 'pull_request' && 'type=gha,scope=pr,mode=max' || format('type=gha,scope={0},mode=max\ntype=registry,ref={1}/{2}:buildcache,mode=max', github.workflow, env.REGISTRY, steps.image.outputs.IMAGE_NAME) }}
           outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || 'type=registry' }}
 
   security-scan:
