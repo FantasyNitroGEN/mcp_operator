@@ -30,6 +30,9 @@ jobs:
         with:
           cluster_name: mcp-e2e
 
+      - name: Ensure namespace mcp exists
+        run: kubectl create namespace mcp || true
+
       - name: Build operator image (no push)
         run: |
           DOCKER_BUILDKIT=1 docker buildx build \
@@ -44,14 +47,14 @@ jobs:
           set -e
           if [ -d ./helm/mcp-operator ]; then
             helm upgrade --install mcp-operator ./helm/mcp-operator \
-              --namespace default --create-namespace
+              --namespace mcp --create-namespace
           else
             helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
             helm repo update
             helm upgrade --install mcp-operator mcp-operator/mcp-operator \
-              --namespace default --create-namespace
+              --namespace mcp --create-namespace
           fi
-          kubectl -n default rollout status deploy/mcp-operator --timeout=300s
+          kubectl -n mcp rollout status deploy/mcp-operator --timeout=300s
 
       - name: Build CLI
         run: go build -o ./bin/mcp ./cmd/mcp
@@ -65,38 +68,38 @@ jobs:
       - name: Install PostgreSQL
         run: |
           helm upgrade --install pg bitnami/postgresql \
-            --namespace default \
+            --namespace mcp \
             --set auth.postgresPassword=postgres \
             --set auth.database=app \
             --set primary.resources.requests.cpu=50m \
             --set primary.resources.requests.memory=128Mi
-          kubectl -n default rollout status statefulset/pg-postgresql --timeout=300s
+          kubectl -n mcp rollout status statefulset/pg-postgresql --timeout=300s
 
       - name: Compute POSTGRES_URL
         id: pgurl
         shell: bash
         run: |
-          URL="postgresql://postgres:postgres@pg-postgresql.default.svc.cluster.local:5432/app?sslmode=disable"
+          URL="postgresql://postgres:postgres@pg-postgresql.mcp.svc.cluster.local:5432/app?sslmode=disable"
           echo "URL=${URL}" >> $GITHUB_OUTPUT
 
       # --- Deploy MCP Postgres server from registry ---
       - name: Deploy MCP server (postgres) from registry
         run: |
           ./bin/mcp server deploy postgres \
-            --namespace default \
+            --namespace mcp \
             --replicas 1 \
             --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}' \
             --wait --timeout 300s
 
       - name: Validate status
         run: |
-          kubectl -n default get mcpservers -o wide
-          kubectl -n default get pods -l app.kubernetes.io/instance=postgres
-          kubectl -n default wait mcpserver/postgres --for=condition=Ready --timeout=120s || true
+          kubectl -n mcp get mcpservers -o wide
+          kubectl -n mcp get pods -l app.kubernetes.io/instance=postgres
+          kubectl -n mcp wait mcpserver/postgres --for=condition=Ready --timeout=120s || true
 
       - name: Dump diagnostics on failure
         if: failure()
         run: |
-          kubectl -n default get all
-          kubectl -n default describe mcpserver postgres || true
-          kubectl -n default logs deploy/mcp-operator || true
+          kubectl -n mcp get all
+          kubectl -n mcp describe mcpserver postgres || true
+          kubectl -n mcp logs deploy/mcp-operator || true
