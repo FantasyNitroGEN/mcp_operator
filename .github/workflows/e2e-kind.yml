@@ -54,7 +54,27 @@ jobs:
             helm upgrade --install mcp-operator mcp-operator/mcp-operator \
               --namespace mcp --create-namespace
           fi
-          kubectl -n mcp rollout status deploy/mcp-operator --timeout=300s
+
+          echo ">>> Проверяем, какой образ у деплоймента"
+          OP_IMG="$(kubectl -n mcp get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          echo "Operator image (before): $OP_IMG"
+
+          if [ "$OP_IMG" != "mcp_operator:dev" ]; then
+            OP_CTN="$(kubectl -n mcp get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].name}')"
+            echo "Patching image to mcp_operator:dev for container: $OP_CTN"
+            kubectl -n mcp set image deploy/mcp-operator "${OP_CTN}=mcp_operator:dev" --record
+          fi
+
+          echo ">>> Ждём готовности деплоймента (увеличим таймаут)"
+          if ! kubectl -n mcp rollout status deploy/mcp-operator --timeout=600s; then
+            echo "Rollout timed out, collecting diagnostics..."
+            kubectl -n mcp get pods -o wide || true
+            kubectl -n mcp describe deploy mcp-operator || true
+            kubectl -n mcp describe pods -l app.kubernetes.io/name=mcp-operator || true
+            kubectl -n mcp get events --sort-by=.lastTimestamp | tail -n 200 || true
+            kubectl -n mcp logs deploy/mcp-operator --all-containers --tail=200 || true
+            exit 1
+          fi
 
       - name: Build CLI
         run: go build -o ./bin/mcp ./cmd/mcp
