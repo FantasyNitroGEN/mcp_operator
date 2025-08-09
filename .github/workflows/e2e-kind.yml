@@ -1,13 +1,18 @@
 name: e2e-kind
 
 on:
-  pull_request:
-    branches: [ main, develop ]
-  push:
-    branches: [ main ]
+  workflow_run:
+    workflows: ["Docker Build and Push"]   # имя workflow из docker.yml (name:)
+    branches: [ main, develop ]            # где он запускается
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: read
 
 jobs:
   e2e-postgres:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -45,6 +50,8 @@ jobs:
       - name: Install MCP Operator (Helm)
         run: |
           set -e
+
+          # 1) ставим чарт как есть, в ns mcp
           if [ -d ./helm/mcp-operator ]; then
             helm upgrade --install mcp-operator ./helm/mcp-operator \
               --namespace mcp --create-namespace
@@ -55,19 +62,20 @@ jobs:
               --namespace mcp --create-namespace
           fi
 
-          echo ">>> Проверяем, какой образ у деплоймента"
+          # 2) убеждаемся, какой образ реально прописан в деплойменте
           OP_IMG="$(kubectl -n mcp get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].image}')"
-          echo "Operator image (before): $OP_IMG"
+          echo "Operator image detected: $OP_IMG"
 
-          if [ "$OP_IMG" != "mcp_operator:dev" ]; then
-            OP_CTN="$(kubectl -n mcp get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].name}')"
-            echo "Patching image to mcp_operator:dev for container: $OP_CTN"
-            kubectl -n mcp set image deploy/mcp-operator "${OP_CTN}=mcp_operator:dev" --record
+          # 3) если по какой-то причине это не latest из GHCR — мягко поправим на latest
+          if ! echo "$OP_IMG" | grep -q "^ghcr.io/fantasynitrogen/mcp_operator:latest$"; then
+            CTN="$(kubectl -n mcp get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].name}')"
+            echo "Fixing image to ghcr.io/fantasynitrogen/mcp_operator:latest (container=$CTN)"
+            kubectl -n mcp set image deploy/mcp-operator "${CTN}=ghcr.io/fantasynitrogen/mcp_operator:latest" --record
           fi
 
-          echo ">>> Ждём готовности деплоймента (увеличим таймаут)"
+          # 4) ждём поднимание с увеличенным таймаутом; если что — собираем диагностику
           if ! kubectl -n mcp rollout status deploy/mcp-operator --timeout=600s; then
-            echo "Rollout timed out, collecting diagnostics..."
+            echo "Rollout timed out — diagnostics:"
             kubectl -n mcp get pods -o wide || true
             kubectl -n mcp describe deploy mcp-operator || true
             kubectl -n mcp describe pods -l app.kubernetes.io/name=mcp-operator || true
