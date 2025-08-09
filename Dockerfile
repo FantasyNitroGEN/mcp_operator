@@ -1,9 +1,19 @@
 # syntax=docker/dockerfile:1
 # Build the manager binary
-FROM golang:1.24-alpine AS builder
+# Билдер ВСЕГДА на билдер-платформе (x86_64 runner), без эмуляции
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
+ARG BUILDPLATFORM
+ARG TARGETPLATFORM
 ARG BUILDKIT_INLINE_CACHE=1
+
+
+# Быстрый, повторяемый билд
+ENV CGO_ENABLED=0 \
+    GO111MODULE=on \
+    GOCACHE=/root/.cache/go-build \
+    GOMODCACHE=/go/pkg/mod
 
 # Install git and ca-certificates for go mod download
 RUN apk add --no-cache git ca-certificates
@@ -28,7 +38,7 @@ COPY pkg/ pkg/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
-    go build -a -ldflags='-w -s' -o manager cmd/manager/main.go
+    go build -trimpath -buildvcs=false -a -ldflags='-w -s' -o manager cmd/manager/main.go
 
 # Use scratch as minimal base image for smallest possible size
 FROM scratch
