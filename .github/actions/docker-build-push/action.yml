@@ -1,58 +1,70 @@
-name: docker-build-push
-description: Multi-arch buildx; PR=build-only; push latest on push
-inputs:
-  registry:   { required: true }
-  image-name: { required: true } # owner/repo in lowercase
-  push:       { default: "false" }
-  cache-scope:{ default: "mcp-operator" }
-outputs:
-  image:  { value: ${{ steps.meta.outputs.image }} }
-  digest: { value: ${{ steps.build.outputs.digest }} }
+name: "Docker Build and Push"
+description: "Builds a Docker image and optionally pushes it to a registry"
+author: "mcp_k8s maintainers"
 runs:
-  using: composite
+  using: "composite"
   steps:
-    - uses: actions/checkout@v4
-    - uses: docker/setup-buildx-action@v3
-      with:
-        driver-opts: |
-          image=moby/buildkit:buildx-stable-1
-          network=host
-    - if: ${{ inputs.push == 'true' }}
-      uses: docker/login-action@v3
+    - name: Checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@49e58f0ed98f4945f9e9a921727ad0dad1f1914f # v3
+
+    - name: Set up Docker Buildx
+      id: buildx
+      uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3
+
+    - name: Log in to Container registry
+      if: inputs.push == 'true'
+      uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3
       with:
         registry: ${{ inputs.registry }}
         username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    - id: meta
-      shell: bash
-      run: |
-        IMAGE="${{ inputs.registry }}/${{ inputs.image-name }}"
-        echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-        if [ "${{ inputs.push }}" = "true" ]; then
-          echo "tags=${IMAGE}:latest" >> "$GITHUB_OUTPUT"
-        else
-          echo "tags=${IMAGE}:pr-${{ github.event.number || 'dry' }}" >> "$GITHUB_OUTPUT"
-        fi
-    - id: build
-      uses: docker/build-push-action@v6
+        password: ${{ github.token }}
+
+    - name: Extract Docker metadata
+      id: meta
+      uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5
+      with:
+        images: ${{ inputs.registry }}/${{ inputs.image-name }}
+        tags: |
+          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          type=ref,event=branch
+          type=ref,event=tag
+          type=sha
+
+    - name: Build and push
+      id: build
+      uses: docker/build-push-action@4f58ea79222ce040e0a8c344a310c38be2c9d702 # v6
       with:
         context: .
-        platforms: linux/amd64,linux/arm64
-        push: ${{ inputs.push }}
+        push: ${{ inputs.push == 'true' }}
         tags: ${{ steps.meta.outputs.tags }}
-        labels: |
-          org.opencontainers.image.title=${{ github.repository }}
-          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          org.opencontainers.image.revision=${{ github.sha }}
-          org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
-        build-args: |
-          BUILDKIT_INLINE_CACHE=1
-        cache-from: ${{ inputs.push == 'true'
-          && format('type=gha,scope={0}\ntype=registry,ref={1}/{2}:buildcache', inputs.cache-scope, inputs.registry, inputs.image-name)
-          || format('type=gha,scope={0}', inputs.cache-scope) }}
-        cache-to: ${{ inputs.push == 'true'
-          && format('type=gha,scope={0},mode=max\ntype=registry,ref={1}/{2}:buildcache,mode=max', inputs.cache-scope, inputs.registry, inputs.image-name)
-          || format('type=gha,scope={0},mode=min', inputs.cache-scope) }}
-        outputs: ${{ inputs.push == 'true' && 'type=registry' || 'type=cacheonly' }}
-        provenance: true
-        attests: type=provenance,mode=max,builder-id=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+    - name: Export outputs
+      shell: bash
+      run: |
+        echo "image=${{ inputs.registry }}/${{ inputs.image-name }}" >> "$GITHUB_OUTPUT"
+        echo "digest=${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+      id: out
+
+inputs:
+  registry:
+    description: "Container registry hostname (e.g., ghcr.io)"
+    required: true
+  image-name:
+    description: "Image name in the form owner/repo or org/name"
+    required: true
+  push:
+    description: "Whether to push the image"
+    required: false
+    default: "false"
+
+outputs:
+  image:
+    description: "Computed image (registry/image-name)"
+    value: ${{ steps.out.outputs.image }}
+  digest:
+    description: "Built image digest"
+    value: ${{ steps.out.outputs.digest }}
