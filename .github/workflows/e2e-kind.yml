@@ -2,7 +2,7 @@ name: e2e-kind
 
 on:
   workflow_run:
-    workflows: ["Docker Build and Push"]   # имя workflow из docker.yml (name:)
+    workflows: ["Release"]   # имя workflow из docker.yml (name:)
     branches: [ main, develop ]            # где он запускается
     types: [completed]
 
