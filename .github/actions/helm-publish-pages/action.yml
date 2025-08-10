@@ -1,0 +1,31 @@
+name: helm-publish-pages
+description: Package charts and publish to GitHub Pages
+inputs:
+  helm-version: { required: true }
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - uses: azure/setup-helm@v4
+      with: { version: ${{ inputs.helm-version }} }
+    - shell: bash
+      run: |
+        set -e
+        rm -rf gh-pages-charts
+        mkdir -p gh-pages-charts
+        if [ -d helm ]; then
+          for chart in helm/*/; do
+            [ -f "${chart}/Chart.yaml" ] || continue
+            helm dependency update "${chart}" || true
+            helm package "${chart}" -d gh-pages-charts
+          done
+        fi
+        OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+        REPO="${{ github.event.repository.name }}"
+        cd gh-pages-charts
+        helm repo index . --url "https://${OWNER_LOWER}.github.io/${REPO}/"
+    - uses: actions/configure-pages@v5
+    - uses: actions/upload-pages-artifact@v3
+      with:
+        path: gh-pages-charts
+    - uses: actions/deploy-pages@v4

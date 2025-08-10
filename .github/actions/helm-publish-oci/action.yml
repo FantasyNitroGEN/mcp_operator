@@ -1,0 +1,30 @@
+name: helm-publish-oci
+description: Package charts in helm/* and push to GHCR OCI
+inputs:
+  helm-version: { required: true }
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - uses: azure/setup-helm@v4
+      with: { version: ${{ inputs.helm-version }} }
+    - shell: bash
+      run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+    - shell: bash
+      run: |
+        set -e
+        REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+        mkdir -p packaged
+        if [ -d helm ]; then
+          for chart in helm/*/; do
+            [ -f "${chart}/Chart.yaml" ] || continue
+            helm dependency update "${chart}" || true
+            helm package "${chart}" -d packaged
+          done
+          for pkg in packaged/*.tgz; do
+            [ -f "$pkg" ] || continue
+            helm push "$pkg" "oci://ghcr.io/${REPO_OWNER}/helm-charts"
+          done
+        else
+          echo "No helm/ dir"
+        fi

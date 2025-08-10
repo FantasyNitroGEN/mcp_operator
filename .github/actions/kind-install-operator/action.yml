@@ -1,0 +1,31 @@
+name: kind-install-operator
+description: Create kind cluster and install operator via Helm
+inputs:
+  chart-path: { default: helm/mcp-operator }
+  namespace:  { default: mcp }
+  helm-version: { required: true }
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - uses: helm/kind-action@v1.10.0
+      with: { wait: 300s, cluster_name: mcp-e2e }
+    - shell: bash
+      run: kubectl create namespace "${{ inputs.namespace }}" || true
+    - uses: azure/setup-helm@v4
+      with: { version: ${{ inputs.helm-version }} }
+    - shell: bash
+      run: |
+        set -e
+        if [ -d "${{ inputs.chart-path }}" ]; then
+          helm upgrade --install mcp-operator "${{ inputs.chart-path }}" \
+            --namespace "${{ inputs.namespace }}" --create-namespace
+        else
+          helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
+          helm repo update
+          helm upgrade --install mcp-operator mcp-operator/mcp-operator \
+            --namespace "${{ inputs.namespace }}" --create-namespace
+        fi
+        kubectl -n "${{ inputs.namespace }}" rollout status deploy/mcp-operator --timeout=600s
+        echo "Operator image:"
+        kubectl -n "${{ inputs.namespace }}" get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].image}'; echo

@@ -1,0 +1,35 @@
+name: helm-lint-ct
+description: Helm lint + chart-testing lint/install
+inputs:
+  helm-version: { required: true }
+  chart-path:   { default: helm/mcp-operator }
+  ct-target-branch: { default: main }
+  run-install:  { default: "true" }
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - uses: azure/setup-helm@v4
+      with: { version: ${{ inputs.helm-version }} }
+    - shell: bash
+      run: |
+        if [ -d "${{ inputs.chart-path }}" ]; then
+          helm dependency update "${{ inputs.chart-path }}" || true
+          helm lint "${{ inputs.chart-path }}"
+        else
+          echo "Chart not found at ${{ inputs.chart-path }} — skipping helm lint."
+        fi
+    - uses: actions/setup-python@v5
+      with: { python-version: '3.x' }
+    - uses: helm/chart-testing-action@v2.7.0
+    - shell: bash
+      run: |
+        if [ -d "helm" ]; then
+          ct lint --target-branch "${{ inputs.ct-target-branch }}" || true
+        fi
+    - if: ${{ inputs.run-install == 'true' }}
+      uses: helm/kind-action@v1.10.0
+      with: { wait: 300s }
+    - if: ${{ inputs.run-install == 'true' }}
+      shell: bash
+      run: ct install --target-branch "${{ inputs.ct-target-branch }}"

@@ -1,0 +1,26 @@
+name: setup-go-ci
+description: Checkout + Setup Go + optional vet/test
+inputs:
+  go-version:
+    required: true
+  run-tests:
+    default: "true"
+  run-vet:
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+        check-latest: true
+    - if: ${{ inputs.run-vet == 'true' }}
+      shell: bash
+      run: |
+        go mod download
+        go mod verify
+        go vet ./...
+    - if: ${{ inputs.run-tests == 'true' }}
+      shell: bash
+      run: go test -race -cover ./...
