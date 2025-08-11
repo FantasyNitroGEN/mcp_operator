@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"k8s.io/client-go/rest"
@@ -36,5 +37,14 @@ func getKubernetesConfigWithPriority(kubeconfig string) (*rest.Config, error) {
 	}
 
 	// Priority 4: Fall back to in-cluster config (last resort)
-	return rest.InClusterConfig()
+	if config, err := rest.InClusterConfig(); err == nil {
+		return config, nil
+	}
+
+	// If we reach here, no configuration source was available
+	return nil, fmt.Errorf("no Kubernetes configuration provided. Please provide configuration using one of these methods:\n" +
+		"  1. Use --kubeconfig flag: --kubeconfig /path/to/kubeconfig\n" +
+		"  2. Set KUBECONFIG environment variable: export KUBECONFIG=/path/to/kubeconfig\n" +
+		"  3. Place kubeconfig at default location: ~/.kube/config\n" +
+		"  4. Run from within a Kubernetes cluster (using service account)")
 }

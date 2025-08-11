@@ -143,37 +143,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return r.handleDeletion(ctx, logger, mcpServer)
 	}
 
-	// Validate MCPServer specification
-	if err := r.ValidationService.ValidateMCPServer(ctx, mcpServer); err != nil {
-		logger.Error(err, "MCPServer validation failed")
-		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
-			string(metav1.ConditionFalse), "ValidationFailed", fmt.Sprintf("MCPServer validation failed: %v", err))
-		r.EventService.RecordWarning(mcpServer, "ValidationFailed", fmt.Sprintf("MCPServer validation failed: %v", err))
-
-		// Update status once at the end and return without requeue - validation errors are spec issues
-		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
-			logger.Error(statusErr, "Failed to update MCPServer status")
-		}
-		return ctrl.Result{}, nil
-	}
-
-	// Validate tenant resource quotas if multi-tenancy is enabled
-	if mcpServer.Spec.Tenancy != nil {
-		if err := r.ValidationService.ValidateTenantResourceQuotas(ctx, mcpServer); err != nil {
-			logger.Error(err, "Tenant resource quota validation failed")
-			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
-				string(metav1.ConditionFalse), "TenantValidationFailed", fmt.Sprintf("Tenant validation failed: %v", err))
-			r.EventService.RecordWarning(mcpServer, "TenantValidationFailed", fmt.Sprintf("Tenant validation failed: %v", err))
-
-			// Update status once and return without requeue - tenant validation errors are spec issues
-			if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
-				logger.Error(statusErr, "Failed to update MCPServer status")
-			}
-			return ctrl.Result{}, nil
-		}
-	}
-
-	// Enrich MCPServer with registry data if registry is specified
+	// Enrich MCPServer with registry data if registry is specified (before validation)
 	if mcpServer.Spec.Registry.Name != "" {
 		logger.Info("Enriching server from registry",
 			"server_name", mcpServer.Spec.Registry.Name,
@@ -228,6 +198,36 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRegistryFetched,
 			string(metav1.ConditionTrue), "RegistryEnrichmentSuccessful", "Successfully enriched MCPServer with registry data")
 		r.EventService.RecordNormal(mcpServer, "RegistryEnrichmentSuccessful", "Successfully enriched MCPServer with registry data")
+	}
+
+	// Validate MCPServer specification
+	if err := r.ValidationService.ValidateMCPServer(ctx, mcpServer); err != nil {
+		logger.Error(err, "MCPServer validation failed")
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+			string(metav1.ConditionFalse), "ValidationFailed", fmt.Sprintf("MCPServer validation failed: %v", err))
+		r.EventService.RecordWarning(mcpServer, "ValidationFailed", fmt.Sprintf("MCPServer validation failed: %v", err))
+
+		// Update status once at the end and return without requeue - validation errors are spec issues
+		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
+			logger.Error(statusErr, "Failed to update MCPServer status")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Validate tenant resource quotas if multi-tenancy is enabled
+	if mcpServer.Spec.Tenancy != nil {
+		if err := r.ValidationService.ValidateTenantResourceQuotas(ctx, mcpServer); err != nil {
+			logger.Error(err, "Tenant resource quota validation failed")
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
+				string(metav1.ConditionFalse), "TenantValidationFailed", fmt.Sprintf("Tenant validation failed: %v", err))
+			r.EventService.RecordWarning(mcpServer, "TenantValidationFailed", fmt.Sprintf("Tenant validation failed: %v", err))
+
+			// Update status once and return without requeue - tenant validation errors are spec issues
+			if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
+				logger.Error(statusErr, "Failed to update MCPServer status")
+			}
+			return ctrl.Result{}, nil
+		}
 	}
 
 	// Set MCPServer phase to pending

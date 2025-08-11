@@ -2,6 +2,13 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+# Controller configuration
+controller:
+  # MCPRegistry controller configuration
+  mcpRegistry:
+    # Enable MCPRegistry controller (conditional registration based on CRD existence)
+    enabled: true
+
 # Operator configuration
 operator:
   # Image configuration

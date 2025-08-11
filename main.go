@@ -14,7 +14,9 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -39,6 +41,15 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(mcpv1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
+}
+
+// mcpRegistryCRDExists checks if the MCPRegistry CRD exists in the cluster
+func mcpRegistryCRDExists(ctx context.Context, client client.Client) bool {
+	crd := &apiextensionsv1.CustomResourceDefinition{}
+	err := client.Get(ctx, types.NamespacedName{
+		Name: "mcpregistries.mcp.io",
+	}, crd)
+	return err == nil
 }
 
 func main() {
@@ -214,20 +225,31 @@ func main() {
 		eventService,
 	)
 
-	// Setup MCPRegistry Controller with dependency injection
-	setupLog.Info("Setting up MCPRegistry controller", "maxConcurrentReconciles", maxConcurrentReconcilesMCPRegistry)
-	if err = (&controllers.MCPRegistryReconciler{
-		Client:            mgr.GetClient(),
-		Scheme:            mgr.GetScheme(),
-		RegistryService:   registryService,
-		StatusService:     statusService,
-		ValidationService: validationService,
-		RetryService:      retryService,
-		EventService:      eventService,
-		CacheService:      cacheService,
-	}).SetupWithManagerAndConcurrency(mgr, maxConcurrentReconcilesMCPRegistry); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "MCPRegistry")
-		os.Exit(1)
+	// Setup MCPRegistry Controller with dependency injection (conditional registration)
+	mcpRegistryEnabled := os.Getenv("MCP_REGISTRY_CONTROLLER_ENABLED")
+	if mcpRegistryEnabled == "true" {
+		// Check if MCPRegistry CRD exists
+		ctx := context.Background()
+		if mcpRegistryCRDExists(ctx, mgr.GetClient()) {
+			setupLog.Info("Setting up MCPRegistry controller", "maxConcurrentReconciles", maxConcurrentReconcilesMCPRegistry)
+			if err = (&controllers.MCPRegistryReconciler{
+				Client:            mgr.GetClient(),
+				Scheme:            mgr.GetScheme(),
+				RegistryService:   registryService,
+				StatusService:     statusService,
+				ValidationService: validationService,
+				RetryService:      retryService,
+				EventService:      eventService,
+				CacheService:      cacheService,
+			}).SetupWithManagerAndConcurrency(mgr, maxConcurrentReconcilesMCPRegistry); err != nil {
+				setupLog.Error(err, "unable to create controller", "controller", "MCPRegistry")
+				os.Exit(1)
+			}
+		} else {
+			setupLog.Info("MCPRegistry CRD not found, skipping MCPRegistry controller setup")
+		}
+	} else {
+		setupLog.Info("MCPRegistry controller disabled by configuration")
 	}
 
 	// Setup MCPServer Controller with dependency injection

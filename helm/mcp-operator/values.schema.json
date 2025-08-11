@@ -4,6 +4,26 @@
   "title": "MCP Operator Helm Chart Values Schema",
   "description": "JSON Schema for validating MCP Operator Helm chart values",
   "properties": {
+    "controller": {
+      "type": "object",
+      "description": "Controller configuration",
+      "properties": {
+        "mcpRegistry": {
+          "type": "object",
+          "description": "MCPRegistry controller configuration",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable MCPRegistry controller (conditional registration based on CRD existence)"
+            }
+          },
+          "required": ["enabled"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["mcpRegistry"],
+      "additionalProperties": false
+    },
     "operator": {
       "type": "object",
       "description": "Operator configuration",

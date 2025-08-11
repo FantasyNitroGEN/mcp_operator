@@ -104,6 +104,8 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: "mcp-operator"
+            - name: MCP_REGISTRY_CONTROLLER_ENABLED
+              value: "{{ .Values.controller.mcpRegistry.enabled }}"
             {{- with .Values.extraEnvVars }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
