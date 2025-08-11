@@ -7,12 +7,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v4
-    - uses: helm/kind-action@v1.10.0
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    - uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
       with: { wait: 300s, cluster_name: mcp-e2e }
     - shell: bash
       run: kubectl create namespace "${{ inputs.namespace }}" || true
-    - uses: azure/setup-helm@v4
+    - uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112 # v4
       with: { version: ${{ inputs.helm-version }} }
     - shell: bash
       run: |
