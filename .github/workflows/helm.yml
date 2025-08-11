@@ -26,6 +26,7 @@ jobs:
   helm-validate:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/helm-lint-ct
         with:
           helm-version: v3.14.4
@@ -37,6 +38,7 @@ jobs:
     needs: helm-validate
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/helm-publish-oci
         with: { helm-version: v3.14.4 }
 
@@ -44,5 +46,6 @@ jobs:
     needs: helm-validate
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/helm-publish-pages
         with: { helm-version: v3.14.4 }
