@@ -112,6 +112,7 @@ jobs:
         run: |
           set -e
           ./bin/mcp server deploy postgres \
+            --registry postgres \
             --kubeconfig "$KUBECONFIG" \
             --namespace mcp \
             --replicas 1 \
