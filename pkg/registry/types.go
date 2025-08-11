@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+// contextKey is a custom type for context keys to avoid collisions
+type contextKey string
+
+// AuthTokenContextKey is the context key for storing authentication tokens
+const AuthTokenContextKey contextKey = "auth_token"
+
 // MCPServerSpec представляет спецификацию MCP сервера из реестра
 type MCPServerSpec struct {
 	Name           string            `json:"name" yaml:"name"`

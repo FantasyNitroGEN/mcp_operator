@@ -105,7 +105,7 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Add token to context for GitHub client
 	if token != "" {
-		ctx = context.WithValue(ctx, "auth_token", token)
+		ctx = context.WithValue(ctx, registry.AuthTokenContextKey, token)
 	}
 
 	// Perform synchronization

@@ -70,7 +70,7 @@ func (g *GitHubRegistryClient) parseRepositoryURL(repoURL string) (*registry.Git
 
 // getTokenFromContext retrieves the auth token from context
 func (g *GitHubRegistryClient) getTokenFromContext(ctx context.Context) string {
-	if token, ok := ctx.Value("auth_token").(string); ok {
+	if token, ok := ctx.Value(registry.AuthTokenContextKey).(string); ok {
 		return token
 	}
 	return ""
