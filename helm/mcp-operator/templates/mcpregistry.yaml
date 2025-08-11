@@ -1,4 +1,4 @@
-{{- if .Values.registry.enabled }}
+{{- if and .Values.registry .Values.registry.enabled }}
 ---
 apiVersion: mcp.allbeone.io/v1
 kind: MCPRegistry
