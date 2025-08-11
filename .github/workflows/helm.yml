@@ -3,7 +3,7 @@ name: Helm Chart
 
 on:
   workflow_run:
-    workflows: [ "Release" ]
+    workflows: [ "Docker" ]
     branches: [ main, develop ]
     types: [ completed ]
 
