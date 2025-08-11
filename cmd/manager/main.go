@@ -43,6 +43,7 @@ func main() {
 	var probeAddr string
 	var webhookPort int
 	var enableWebhooks bool
+	var maxConcurrentReconcilesMCPServer int
 
 	// GitHub retry configuration flags
 	var githubMaxRetries int
@@ -62,6 +63,8 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.IntVar(&maxConcurrentReconcilesMCPServer, "max-concurrent-reconciles-mcpserver", 5,
+		"Maximum number of concurrent reconciles for MCPServer controller")
 
 	// GitHub retry configuration flags
 	flag.IntVar(&githubMaxRetries, "github-max-retries", 5, "Maximum number of retries for general GitHub API errors.")
@@ -143,6 +146,7 @@ func main() {
 	autoUpdateService := services.NewDefaultAutoUpdateService(mgr.GetClient(), registryService, statusService, eventService)
 	cacheService := services.NewDefaultCacheService()
 
+	setupLog.Info("Setting up MCPServer controller", "maxConcurrentReconciles", maxConcurrentReconcilesMCPServer)
 	if err = (&controllers.MCPServerReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
@@ -154,7 +158,7 @@ func main() {
 		EventService:      eventService,
 		AutoUpdateService: autoUpdateService,
 		CacheService:      cacheService,
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManagerAndConcurrency(mgr, maxConcurrentReconcilesMCPServer); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPServer")
 		os.Exit(1)
 	}
