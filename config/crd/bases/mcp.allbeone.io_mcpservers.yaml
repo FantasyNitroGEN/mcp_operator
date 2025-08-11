@@ -1772,16 +1772,24 @@ spec:
                     description: License лицензия сервера
                     type: string
                   name:
-                    description: Name название сервера в реестре
+                    description: Name название сервера в реестре (устаревшее, используйте
+                      ServerName)
+                    type: string
+                  registryName:
+                    description: RegistryName название MCPRegistry в том же namespace
                     type: string
                   repository:
                     description: Repository URL репозитория
+                    type: string
+                  serverName:
+                    description: ServerName имя сервера в реестре
                     type: string
                   version:
                     description: Version версия сервера
                     type: string
                 required:
-                - name
+                - registryName
+                - serverName
                 type: object
               replicas:
                 description: Replicas определяет количество реплик сервера

@@ -91,3 +91,39 @@ type RegistryResponse struct {
 	Content     string `json:"content,omitempty"`
 	Encoding    string `json:"encoding,omitempty"`
 }
+
+// GitHubRepository представляет GitHub репозиторий
+type GitHubRepository struct {
+	Owner     string `json:"owner"`
+	Name      string `json:"name"`
+	Branch    string `json:"branch"`
+	Path      string `json:"path,omitempty"`
+	AuthToken string `json:"-"`
+}
+
+// SyncResult представляет результат синхронизации
+type SyncResult struct {
+	Servers       []MCPServerInfo           `json:"servers"`
+	ServerSpecs   map[string]*MCPServerSpec `json:"server_specs"`
+	ObservedSHA   string                    `json:"observed_sha"`
+	ServersCount  int32                     `json:"servers_count"`
+	RateLimitInfo *RateLimitInfo            `json:"rate_limit_info,omitempty"`
+	Errors        []string                  `json:"errors,omitempty"`
+}
+
+// RateLimitInfo содержит информацию о лимитах GitHub API
+type RateLimitInfo struct {
+	Limit     int32     `json:"limit"`
+	Remaining int32     `json:"remaining"`
+	Reset     time.Time `json:"reset"`
+}
+
+// RegistryIndex представляет индекс серверов в реестре
+type RegistryIndex struct {
+	Name         string            `json:"name"`
+	Description  string            `json:"description,omitempty"`
+	LastUpdated  time.Time         `json:"last_updated"`
+	ServersCount int32             `json:"servers_count"`
+	Servers      []MCPServerInfo   `json:"servers"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
+}

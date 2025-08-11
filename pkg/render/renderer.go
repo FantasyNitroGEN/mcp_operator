@@ -67,6 +67,32 @@ func (r *DefaultRendererService) RenderResources(mcpServer *mcpv1.MCPServer) ([]
 		yamlDocs = append(yamlDocs, yamlDoc)
 	}
 
+	// 3. ConfigMap (if needed)
+	configMap := r.resourceBuilder.BuildConfigMap(mcpServer)
+	if configMap != nil {
+		r.AddRequiredLabels(configMap, mcpServer)
+		resources = append(resources, configMap)
+
+		yamlDoc, err := r.objectToYAML(configMap)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to serialize configMap to YAML: %w", err)
+		}
+		yamlDocs = append(yamlDocs, yamlDoc)
+	}
+
+	// 4. Secret (if needed)
+	secret := r.resourceBuilder.BuildSecret(mcpServer)
+	if secret != nil {
+		r.AddRequiredLabels(secret, mcpServer)
+		resources = append(resources, secret)
+
+		yamlDoc, err := r.objectToYAML(secret)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to serialize secret to YAML: %w", err)
+		}
+		yamlDocs = append(yamlDocs, yamlDoc)
+	}
+
 	// 3. HPA (if autoscaling is enabled)
 	if mcpServer.Spec.Autoscaling != nil && mcpServer.Spec.Autoscaling.HPA != nil {
 		hpa := r.resourceBuilder.BuildHPA(mcpServer)
@@ -157,7 +183,8 @@ func (r *DefaultRendererService) AddRequiredLabels(obj client.Object, mcpServer 
 
 	// Add required labels from the issue description
 	labels["mcp.allbeone.io/name"] = mcpServer.Name
-	labels["mcp.allbeone.io/namespace"] = mcpServer.Namespace
+	labels["mcp.allbeone.io/registry"] = mcpServer.Spec.Registry.RegistryName
+	labels["mcp.allbeone.io/server"] = mcpServer.Spec.Registry.ServerName
 
 	obj.SetLabels(labels)
 }

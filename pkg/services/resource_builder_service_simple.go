@@ -117,6 +117,74 @@ func (r *SimpleResourceBuilderService) BuildService(mcpServer *mcpv1.MCPServer) 
 	return service
 }
 
+// BuildConfigMap builds config map for MCPServer (simplified)
+func (r *SimpleResourceBuilderService) BuildConfigMap(mcpServer *mcpv1.MCPServer) *corev1.ConfigMap {
+	logger := log.Log.WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
+	logger.V(1).Info("Building config map (simple)")
+
+	labels := r.buildLabels(mcpServer)
+
+	// Build simple config map data
+	data := make(map[string]string)
+
+	// Add configuration from spec.config if present
+	if mcpServer.Spec.Config != nil && mcpServer.Spec.Config.Raw != nil {
+		data["config.json"] = string(mcpServer.Spec.Config.Raw)
+	}
+
+	// Add environment variables as config
+	for key, value := range mcpServer.Spec.Environment {
+		data[key] = value
+	}
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-config", mcpServer.Name),
+			Namespace: mcpServer.Namespace,
+			Labels:    labels,
+		},
+		Data: data,
+	}
+
+	logger.V(1).Info("ConfigMap built successfully (simple)", "dataKeys", len(data))
+	return configMap
+}
+
+// BuildSecret builds secret for MCPServer (simplified)
+func (r *SimpleResourceBuilderService) BuildSecret(mcpServer *mcpv1.MCPServer) *corev1.Secret {
+	logger := log.Log.WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
+	logger.V(1).Info("Building secret (simple)")
+
+	labels := r.buildLabels(mcpServer)
+
+	// Build simple secret data from secret references
+	data := make(map[string][]byte)
+
+	// Add any sensitive configuration from secretRefs
+	for _, secretRef := range mcpServer.Spec.SecretRefs {
+		data[secretRef.Key] = []byte(fmt.Sprintf("secret-data-for-%s", secretRef.Key))
+	}
+
+	// Only create secret if there's data to store
+	if len(data) == 0 {
+		logger.V(1).Info("No secret data to store, skipping secret creation (simple)")
+		return nil
+	}
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-secret", mcpServer.Name),
+			Namespace: mcpServer.Namespace,
+			Labels:    labels,
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: data,
+	}
+
+	logger.V(1).Info("Secret built successfully (simple)", "dataKeys", len(data))
+	return secret
+}
+
 // BuildHPA builds horizontal pod autoscaler for MCPServer
 func (r *SimpleResourceBuilderService) BuildHPA(mcpServer *mcpv1.MCPServer) *autoscalingv2.HorizontalPodAutoscaler {
 	if mcpServer.Spec.Autoscaling == nil || mcpServer.Spec.Autoscaling.HPA == nil {

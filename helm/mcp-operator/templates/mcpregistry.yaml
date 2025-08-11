@@ -1,0 +1,38 @@
+{{- if .Values.registry.enabled }}
+---
+apiVersion: mcp.allbeone.io/v1
+kind: MCPRegistry
+metadata:
+  name: {{ .Values.registry.name }}
+  namespace: {{ include "mcp-operator.namespace" . }}
+  labels:
+    {{- include "mcp-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: registry
+  annotations:
+    helm.sh/resource-policy: keep
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .Values.registry.source.type }}
+  {{- if eq .Values.registry.source.type "github" }}
+  source:
+    type: github
+    github:
+      repo: {{ .Values.registry.source.repo }}
+      {{- if .Values.registry.source.branch }}
+      branch: {{ .Values.registry.source.branch }}
+      {{- end }}
+    {{- if .Values.registry.source.path }}
+    path: {{ .Values.registry.source.path }}
+    {{- end }}
+  {{- end }}
+  {{- if .Values.registry.refreshInterval }}
+  refreshInterval: {{ .Values.registry.refreshInterval }}
+  {{- end }}
+  {{- if .Values.registry.auth.secretName }}
+  auth:
+    secretRef:
+      name: {{ .Values.registry.auth.secretName }}
+  {{- end }}
+{{- end }}

@@ -4,6 +4,36 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// RegistrySource defines the source configuration for the registry
+type RegistrySource struct {
+	// Type specifies the source type (github, git, oci)
+	Type string `json:"type"`
+
+	// Github contains GitHub-specific source configuration
+	Github *GithubSource `json:"github,omitempty"`
+
+	// Path specifies the root path within the repository containing server folders
+	Path string `json:"path,omitempty"`
+}
+
+// GithubSource contains GitHub-specific source configuration
+type GithubSource struct {
+	// Repo specifies the GitHub repository in owner/repo format
+	Repo string `json:"repo"`
+
+	// Branch specifies the branch or ref to use (defaults to main)
+	Branch string `json:"branch,omitempty"`
+}
+
+// RegistryFilters contains include/exclude patterns for servers
+type RegistryFilters struct {
+	// Include contains patterns of servers to include
+	Include []string `json:"include,omitempty"`
+
+	// Exclude contains patterns of servers to exclude
+	Exclude []string `json:"exclude,omitempty"`
+}
+
 // MCPRegistrySpec defines the desired state of MCPRegistry
 type MCPRegistrySpec struct {
 	// URL is the base URL of the MCP registry
@@ -12,14 +42,23 @@ type MCPRegistrySpec struct {
 	// Type specifies the registry type (github, local, etc.)
 	Type string `json:"type,omitempty"`
 
+	// Source contains the source configuration for the registry
+	Source *RegistrySource `json:"source,omitempty"`
+
 	// Auth contains authentication information for the registry
 	Auth *RegistryAuth `json:"auth,omitempty"`
 
 	// SyncInterval specifies how often to sync with the registry
 	SyncInterval *metav1.Duration `json:"syncInterval,omitempty"`
 
+	// RefreshInterval specifies how often to refresh the registry
+	RefreshInterval *metav1.Duration `json:"refreshInterval,omitempty"`
+
 	// Servers is a list of specific servers to sync from this registry
 	Servers []string `json:"servers,omitempty"`
+
+	// Filters contains include/exclude patterns for servers
+	Filters *RegistryFilters `json:"filters,omitempty"`
 }
 
 // RegistryAuth contains authentication information
@@ -42,11 +81,23 @@ type MCPRegistryStatus struct {
 	// Reason provides a brief reason for the current status
 	Reason string `json:"reason,omitempty"`
 
+	// ObservedRevision contains the SHA/etag of the last observed revision
+	ObservedRevision string `json:"observedRevision,omitempty"`
+
 	// LastSyncTime is the last time the registry was successfully synced
 	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
 
-	// AvailableServers is the number of servers available in this registry
+	// ServersDiscovered is the number of servers discovered in this registry
+	ServersDiscovered int32 `json:"serversDiscovered,omitempty"`
+
+	// AvailableServers is the number of servers available in this registry (deprecated, use ServersDiscovered)
 	AvailableServers int32 `json:"availableServers,omitempty"`
+
+	// Errors contains the last N errors as strings
+	Errors []string `json:"errors,omitempty"`
+
+	// RateLimitRemaining contains the remaining GitHub API rate limit (if applicable)
+	RateLimitRemaining *int32 `json:"rateLimitRemaining,omitempty"`
 
 	// Conditions represent the latest available observations of the registry's state
 	Conditions []MCPRegistryCondition `json:"conditions,omitempty"`
@@ -100,6 +151,15 @@ const (
 	// MCPRegistryConditionSynced indicates whether the registry has been synced
 	MCPRegistryConditionSynced MCPRegistryConditionType = "Synced"
 
+	// MCPRegistryConditionSyncing indicates whether the registry is currently syncing
+	MCPRegistryConditionSyncing MCPRegistryConditionType = "Syncing"
+
+	// MCPRegistryConditionRateLimited indicates whether the registry is rate limited
+	MCPRegistryConditionRateLimited MCPRegistryConditionType = "RateLimited"
+
+	// MCPRegistryConditionAuthFailed indicates whether authentication has failed
+	MCPRegistryConditionAuthFailed MCPRegistryConditionType = "AuthFailed"
+
 	// MCPRegistryConditionAuthenticated indicates whether authentication is successful
 	MCPRegistryConditionAuthenticated MCPRegistryConditionType = "Authenticated"
 )
@@ -121,10 +181,9 @@ type MCPServerInfo struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
-// +kubebuilder:printcolumn:name="URL",type="string",JSONPath=".spec.url"
-// +kubebuilder:printcolumn:name="Servers",type="integer",JSONPath=".status.availableServers"
-// +kubebuilder:printcolumn:name="Last Sync",type="date",JSONPath=".status.lastSyncTime"
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="Servers",type=integer,JSONPath=".status.serversDiscovered"
+// +kubebuilder:printcolumn:name="LastSync",type=date,JSONPath=".status.lastSyncTime"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // MCPRegistry is the Schema for the mcpregistries API

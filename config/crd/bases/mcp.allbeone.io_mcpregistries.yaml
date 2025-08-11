@@ -15,17 +15,14 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
       type: string
-    - jsonPath: .spec.url
-      name: URL
-      type: string
-    - jsonPath: .status.availableServers
+    - jsonPath: .status.serversDiscovered
       name: Servers
       type: integer
     - jsonPath: .status.lastSyncTime
-      name: Last Sync
+      name: LastSync
       type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -84,12 +81,56 @@ spec:
                       for production)
                     type: string
                 type: object
+              filters:
+                description: Filters contains include/exclude patterns for servers
+                properties:
+                  exclude:
+                    description: Exclude contains patterns of servers to exclude
+                    items:
+                      type: string
+                    type: array
+                  include:
+                    description: Include contains patterns of servers to include
+                    items:
+                      type: string
+                    type: array
+                type: object
+              refreshInterval:
+                description: RefreshInterval specifies how often to refresh the registry
+                type: string
               servers:
                 description: Servers is a list of specific servers to sync from this
                   registry
                 items:
                   type: string
                 type: array
+              source:
+                description: Source contains the source configuration for the registry
+                properties:
+                  github:
+                    description: Github contains GitHub-specific source configuration
+                    properties:
+                      branch:
+                        description: Branch specifies the branch or ref to use (defaults
+                          to main)
+                        type: string
+                      repo:
+                        description: Repo specifies the GitHub repository in owner/repo
+                          format
+                        type: string
+                    required:
+                    - repo
+                    type: object
+                  path:
+                    description: Path specifies the root path within the repository
+                      containing server folders
+                    type: string
+                  type:
+                    description: Type specifies the source type (github, git, oci)
+                    type: string
+                required:
+                - type
+                type: object
               syncInterval:
                 description: SyncInterval specifies how often to sync with the registry
                 type: string
@@ -107,7 +148,7 @@ spec:
             properties:
               availableServers:
                 description: AvailableServers is the number of servers available in
-                  this registry
+                  this registry (deprecated, use ServersDiscovered)
                 format: int32
                 type: integer
               conditions:
@@ -144,6 +185,11 @@ spec:
                   - type
                   type: object
                 type: array
+              errors:
+                description: Errors contains the last N errors as strings
+                items:
+                  type: string
+                type: array
               lastSyncTime:
                 description: LastSyncTime is the last time the registry was successfully
                   synced
@@ -153,9 +199,18 @@ spec:
                 description: Message provides human-readable information about the
                   registry status
                 type: string
+              observedRevision:
+                description: ObservedRevision contains the SHA/etag of the last observed
+                  revision
+                type: string
               phase:
                 description: Phase represents the current phase of the registry
                 type: string
+              rateLimitRemaining:
+                description: RateLimitRemaining contains the remaining GitHub API
+                  rate limit (if applicable)
+                format: int32
+                type: integer
               reason:
                 description: Reason provides a brief reason for the current status
                 type: string
@@ -184,6 +239,11 @@ spec:
                   - name
                   type: object
                 type: array
+              serversDiscovered:
+                description: ServersDiscovered is the number of servers discovered
+                  in this registry
+                format: int32
+                type: integer
             type: object
         type: object
     served: true

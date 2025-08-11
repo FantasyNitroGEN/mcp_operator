@@ -14,11 +14,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/metrics"
@@ -109,7 +112,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		"generation", mcpServer.Generation,
 		"resource_version", mcpServer.ResourceVersion,
 		"current_phase", mcpServer.Status.Phase,
-		"registry_name", mcpServer.Spec.Registry.Name,
+		"registry_name", mcpServer.Spec.Registry.RegistryName,
+		"server_name", mcpServer.Spec.Registry.ServerName,
 		"runtime_type", mcpServer.Spec.Runtime.Type,
 	)
 
@@ -123,7 +127,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	metrics.UpdateMCPServerInfo(
 		mcpServer.Namespace,
 		mcpServer.Name,
-		mcpServer.Spec.Registry.Name,
+		mcpServer.Spec.Registry.RegistryName,
 		mcpServer.Spec.Runtime.Type,
 		mcpServer.Spec.Runtime.Image,
 		mcpServer.Spec.Registry.Version,
@@ -145,41 +149,45 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return r.handleDeletion(ctx, logger, mcpServer)
 	}
 
-	// Enrich MCPServer with registry data if registry is specified (before validation)
-	if mcpServer.Spec.Registry.Name != "" {
-		logger.Info("Enriching server from registry",
-			"server_name", mcpServer.Spec.Registry.Name,
-			"phase", "registry_enrichment",
+	// Enrich MCPServer with registry data from cache if registry is specified (before validation)
+	if mcpServer.Spec.Registry.RegistryName != "" && mcpServer.Spec.Registry.ServerName != "" {
+		logger.Info("Enriching server from registry cache",
+			"registry_name", mcpServer.Spec.Registry.RegistryName,
+			"server_name", mcpServer.Spec.Registry.ServerName,
+			"phase", "registry_cache_enrichment",
 		)
 
 		registryStartTime := time.Now()
-		if err := r.RetryService.RetryRegistryOperation(ctx, func() error {
-			return r.RegistryService.EnrichMCPServer(ctx, mcpServer, mcpServer.Spec.Registry.Name)
-		}); err != nil {
-			logger.Error(err, "Failed to enrich MCPServer with registry data",
-				"server_name", mcpServer.Spec.Registry.Name,
-				"phase", "registry_enrichment",
+		if err := r.RegistryService.EnrichMCPServerFromCache(ctx, mcpServer); err != nil {
+			logger.Error(err, "Failed to enrich MCPServer from registry cache",
+				"registry_name", mcpServer.Spec.Registry.RegistryName,
+				"server_name", mcpServer.Spec.Registry.ServerName,
+				"phase", "registry_cache_enrichment",
 				"duration", time.Since(registryStartTime),
-				"error_type", "registry_enrich_error",
+				"error_type", "registry_cache_enrich_error",
 			)
-			metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.Name, "error", time.Since(registryStartTime).Seconds())
+			metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.RegistryName, "error", time.Since(registryStartTime).Seconds())
 			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRegistryFetched,
-				string(metav1.ConditionFalse), "RegistryEnrichmentFailed", fmt.Sprintf("Failed to enrich from registry: %v", err))
-			r.EventService.RecordWarning(mcpServer, "RegistryEnrichmentFailed", fmt.Sprintf("Failed to enrich from registry: %v", err))
+				string(metav1.ConditionFalse), "RegistryMissing", fmt.Sprintf("Registry cache missing: %v", err))
+			r.EventService.RecordWarning(mcpServer, "RegistryMissing", fmt.Sprintf("Registry cache missing: %v", err))
 
-			// Update status once and return without requeue - registry errors will be retried on next event
+			// Update status once and return without requeue - cache errors will be retried when ConfigMap is created
 			if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
 				logger.Error(statusErr, "Failed to update MCPServer status")
 			}
 			return ctrl.Result{}, nil
 		}
 
-		logger.Info("Successfully enriched server from registry",
-			"server_name", mcpServer.Spec.Registry.Name,
-			"phase", "registry_enrichment",
+		logger.Info("Successfully enriched server from registry cache",
+			"registry_name", mcpServer.Spec.Registry.RegistryName,
+			"server_name", mcpServer.Spec.Registry.ServerName,
+			"phase", "registry_cache_enrichment",
 			"duration", time.Since(registryStartTime),
 		)
-		metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.Name, "success", time.Since(registryStartTime).Seconds())
+		metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.RegistryName, "success", time.Since(registryStartTime).Seconds())
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRegistryFetched,
+			string(metav1.ConditionTrue), "RegistryFetched", "Successfully enriched from registry cache")
+		r.EventService.RecordNormal(mcpServer, "RegistryFetched", "Successfully enriched from registry cache")
 
 		// Update MCPServer with enriched data
 		if err := r.Update(ctx, mcpServer); err != nil {
@@ -407,7 +415,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			// All replicas are ready and deployment is stable
 			mcpServer.Status.Phase = mcpv1.MCPServerPhaseRunning
 			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
-				string(metav1.ConditionTrue), "DeploymentReady", "MCPServer deployment is ready")
+				string(metav1.ConditionTrue), "DeploymentReady", fmt.Sprintf("ReadyReplicas=%d/%d", deployment.Status.ReadyReplicas, desiredReplicas))
 			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
 				string(metav1.ConditionFalse), "DeploymentComplete", "MCPServer deployment completed successfully")
 			r.EventService.RecordNormal(mcpServer, "DeploymentReady", "MCPServer deployment is ready and running")
@@ -524,12 +532,67 @@ func (r *MCPServerReconciler) SetupWithManagerAndConcurrency(mgr ctrl.Manager, m
 		For(&mcpv1.MCPServer{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.Secret{}).
 		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
 		Owns(&networkingv1.NetworkPolicy{}).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.findMCPServersForConfigMap),
+		).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(r)
+}
+
+// findMCPServersForConfigMap returns reconcile requests for MCPServers that use a specific registry ConfigMap
+func (r *MCPServerReconciler) findMCPServersForConfigMap(ctx context.Context, configMap client.Object) []reconcile.Request {
+	var requests []reconcile.Request
+
+	// Check if this is a registry ConfigMap by its labels
+	labels := configMap.GetLabels()
+	if labels == nil {
+		return requests
+	}
+
+	registryName, hasRegistryLabel := labels["mcp.allbeone.io/registry"]
+	serverName, hasServerLabel := labels["mcp.allbeone.io/server"]
+
+	if !hasRegistryLabel || !hasServerLabel {
+		return requests
+	}
+
+	// Also check if the ConfigMap name matches the expected pattern
+	expectedName := fmt.Sprintf("mcpregistry-%s-%s", registryName, serverName)
+	if configMap.GetName() != expectedName {
+		return requests
+	}
+
+	// Find all MCPServers that use this registry and server
+	mcpServerList := &mcpv1.MCPServerList{}
+
+	if err := r.List(ctx, mcpServerList, client.InNamespace(configMap.GetNamespace())); err != nil {
+		// Log error but continue
+		log.FromContext(ctx).Error(err, "Failed to list MCPServers for ConfigMap watch",
+			"configMap", configMap.GetName(),
+			"namespace", configMap.GetNamespace())
+		return requests
+	}
+
+	for _, mcpServer := range mcpServerList.Items {
+		if mcpServer.Spec.Registry.RegistryName == registryName &&
+			mcpServer.Spec.Registry.ServerName == serverName {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      mcpServer.Name,
+					Namespace: mcpServer.Namespace,
+				},
+			})
+		}
+	}
+
+	return requests
 }
 
 // GetMCPServerByNameIndexed retrieves an MCPServer by name using field indexer for efficient lookup with caching
@@ -626,6 +689,8 @@ func (r *MCPServerReconciler) applyRenderedResources(ctx context.Context, logger
 			labels = make(map[string]string)
 		}
 		labels["mcp.allbeone.io/name"] = mcpServer.Name
+		labels["mcp.allbeone.io/registry"] = mcpServer.Spec.Registry.RegistryName
+		labels["mcp.allbeone.io/server"] = mcpServer.Spec.Registry.ServerName
 		labels["mcp.allbeone.io/hash"] = renderedHash
 		resource.SetLabels(labels)
 

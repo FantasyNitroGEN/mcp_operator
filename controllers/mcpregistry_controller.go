@@ -6,32 +6,27 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
-	"github.com/FantasyNitroGEN/mcp_operator/pkg/metrics"
-	"github.com/FantasyNitroGEN/mcp_operator/pkg/services"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry/cache"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry/github"
 )
 
 // MCPRegistryReconciler reconciles a MCPRegistry object
 type MCPRegistryReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-
-	// Service dependencies
-	RegistryService   services.RegistryService
-	StatusService     services.StatusService
-	ValidationService services.ValidationService
-	RetryService      services.RetryService
-	EventService      services.EventService
-	CacheService      services.CacheService
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpregistries,verbs=get;list;watch;create;update;patch;delete
@@ -39,6 +34,7 @@ type MCPRegistryReconciler struct {
 // +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpregistries/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -47,8 +43,8 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	logger.Info("Starting reconciliation")
 
 	// Fetch the MCPRegistry instance
-	registry := &mcpv1.MCPRegistry{}
-	if err := r.Get(ctx, req.NamespacedName, registry); err != nil {
+	mcpRegistry := &mcpv1.MCPRegistry{}
+	if err := r.Get(ctx, req.NamespacedName, mcpRegistry); err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("MCPRegistry resource not found, ignoring since object must be deleted")
 			return ctrl.Result{}, nil
@@ -58,268 +54,248 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Handle deletion
-	if registry.DeletionTimestamp != nil {
-		return r.handleDeletion(ctx, logger, registry)
+	if mcpRegistry.DeletionTimestamp != nil {
+		return r.handleDeletion(ctx, logger, mcpRegistry)
 	}
 
-	// Update metrics
-	metrics.RegistryReconciliations.WithLabelValues(registry.Name, registry.Namespace).Inc()
-
-	// Validate registry specification
-	if err := r.ValidationService.ValidateRegistry(ctx, registry); err != nil {
-		logger.Error(err, "Registry validation failed")
-		r.StatusService.SetRegistryCondition(registry, mcpv1.MCPRegistryConditionReady,
-			string(metav1.ConditionFalse), "ValidationFailed", fmt.Sprintf("Registry validation failed: %v", err))
-		r.EventService.RecordWarning(registry, "ValidationFailed", fmt.Sprintf("Registry validation failed: %v", err))
-
-		if statusErr := r.StatusService.UpdateMCPRegistryStatus(ctx, registry); statusErr != nil {
-			logger.Error(statusErr, "Failed to update registry status")
+	// Validate that source is configured
+	if mcpRegistry.Spec.Source == nil || mcpRegistry.Spec.Source.Type != "github" || mcpRegistry.Spec.Source.Github == nil {
+		err := fmt.Errorf("only GitHub source type is supported currently")
+		logger.Error(err, "Invalid source configuration")
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReady, metav1.ConditionFalse, "InvalidSource", err.Error())
+		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "ValidationFailed", err.Error())
+		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
+			logger.Error(statusErr, "Failed to update status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
 	}
 
-	// Set the registry phase to syncing
-	registry.Status.Phase = mcpv1.MCPRegistryPhaseSyncing
-	r.StatusService.SetRegistryCondition(registry, mcpv1.MCPRegistryConditionSynced,
-		string(metav1.ConditionUnknown), "SyncInProgress", "Registry synchronization in progress")
+	// Set syncing condition
+	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSyncing, metav1.ConditionTrue, "SyncInProgress", "Registry synchronization in progress")
+	mcpRegistry.Status.Phase = mcpv1.MCPRegistryPhaseSyncing
 
-	// Validate registry connection with retry
-	if err := r.RetryService.RetryRegistryOperation(ctx, func() error {
-		return r.RegistryService.ValidateRegistryConnection(ctx, registry)
-	}); err != nil {
-		logger.Error(err, "Failed to validate registry connection")
-		registry.Status.Phase = mcpv1.MCPRegistryPhaseFailed
-		r.StatusService.SetRegistryCondition(registry, mcpv1.MCPRegistryConditionAuthenticated,
-			string(metav1.ConditionFalse), "ConnectionFailed", fmt.Sprintf("Failed to connect to registry: %v", err))
-		r.EventService.RecordWarning(registry, "ConnectionFailed", fmt.Sprintf("Failed to connect to registry: %v", err))
-
-		if statusErr := r.StatusService.UpdateMCPRegistryStatus(ctx, registry); statusErr != nil {
-			logger.Error(statusErr, "Failed to update registry status")
-		}
-		return ctrl.Result{RequeueAfter: time.Minute * 10}, nil
+	if err := r.updateStatus(ctx, mcpRegistry); err != nil {
+		logger.Error(err, "Failed to update status to syncing")
+		return ctrl.Result{}, err
 	}
 
-	// Set authentication condition to true
-	r.StatusService.SetRegistryCondition(registry, mcpv1.MCPRegistryConditionAuthenticated,
-		string(metav1.ConditionTrue), "ConnectionSuccessful", "Successfully connected to registry")
+	// Get authentication token if configured
+	token, err := r.getAuthToken(ctx, mcpRegistry)
+	if err != nil {
+		logger.Error(err, "Failed to get authentication token")
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionAuthFailed, metav1.ConditionTrue, "AuthTokenFailed", err.Error())
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReady, metav1.ConditionFalse, "AuthTokenFailed", err.Error())
+		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "AuthFailed", err.Error())
+		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
+			logger.Error(statusErr, "Failed to update status")
+		}
+		return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
+	}
 
-	// Sync registry data with retry
-	if err := r.RetryService.RetryRegistryOperation(ctx, func() error {
-		return r.RegistryService.SyncRegistry(ctx, registry)
-	}); err != nil {
+	// Create GitHub client and perform synchronization
+	registryClient := registry.NewClient()
+	if token != "" {
+		registryClient = registry.NewClientWithToken(token)
+		logger.V(1).Info("Using authenticated GitHub client")
+	} else {
+		logger.V(1).Info("Using anonymous GitHub client")
+	}
+
+	githubClient := github.NewGitHubRegistryClient(registryClient)
+
+	// Add token to context for GitHub client
+	if token != "" {
+		ctx = context.WithValue(ctx, "auth_token", token)
+	}
+
+	// Perform synchronization
+	syncResult, err := githubClient.SyncRegistry(ctx, mcpRegistry)
+	if err != nil {
 		logger.Error(err, "Failed to sync registry")
-		registry.Status.Phase = mcpv1.MCPRegistryPhaseFailed
-		r.StatusService.SetRegistryCondition(registry, mcpv1.MCPRegistryConditionSynced,
-			string(metav1.ConditionFalse), "SyncFailed", fmt.Sprintf("Failed to sync registry: %v", err))
-		r.EventService.RecordWarning(registry, "SyncFailed", fmt.Sprintf("Failed to sync registry: %v", err))
-
-		if statusErr := r.StatusService.UpdateMCPRegistryStatus(ctx, registry); statusErr != nil {
-			logger.Error(statusErr, "Failed to update registry status")
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSyncing, metav1.ConditionFalse, "SyncFailed", err.Error())
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReady, metav1.ConditionFalse, "SyncFailed", err.Error())
+		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "SyncFailed", err.Error())
+		mcpRegistry.Status.Phase = mcpv1.MCPRegistryPhaseFailed
+		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
+			logger.Error(statusErr, "Failed to update status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute * 15}, nil
 	}
 
-	// Update registry status to ready
-	registry.Status.Phase = mcpv1.MCPRegistryPhaseReady
+	// Create cache manager and cache servers
+	cacheManager := cache.NewCacheManager(r.Client)
+	var cacheErrors []string
+
+	for _, server := range syncResult.Servers {
+		if serverSpec, ok := syncResult.ServerSpecs[server.Name]; ok {
+			err := cacheManager.CacheServer(ctx, mcpRegistry.Name, &server, serverSpec, mcpRegistry)
+			if err != nil {
+				cacheError := fmt.Sprintf("failed to cache server %s: %v", server.Name, err)
+				cacheErrors = append(cacheErrors, cacheError)
+				logger.Error(err, "Failed to cache server", "server", server.Name)
+			} else {
+				logger.V(1).Info("Successfully cached server", "server", server.Name)
+			}
+		}
+	}
+
+	// Update status with sync results
 	now := metav1.Now()
-	registry.Status.LastSyncTime = &now
+	mcpRegistry.Status.LastSyncTime = &now
+	mcpRegistry.Status.ServersDiscovered = syncResult.ServersCount
+	mcpRegistry.Status.ObservedRevision = syncResult.ObservedSHA
+	mcpRegistry.Status.Phase = mcpv1.MCPRegistryPhaseReady
 
-	r.StatusService.SetRegistryCondition(registry, mcpv1.MCPRegistryConditionReady,
-		string(metav1.ConditionTrue), "SyncSuccessful", "Registry synchronized successfully")
-	r.StatusService.SetRegistryCondition(registry, mcpv1.MCPRegistryConditionSynced,
-		string(metav1.ConditionTrue), "SyncSuccessful", "Registry synchronized successfully")
+	// Update errors in status
+	allErrors := append(syncResult.Errors, cacheErrors...)
+	if len(allErrors) > 10 {
+		allErrors = allErrors[:10] // Keep only last 10 errors
+	}
+	mcpRegistry.Status.Errors = allErrors
 
-	r.EventService.RecordNormal(registry, "SyncSuccessful", "Registry synchronized successfully")
+	// Update rate limit info if available
+	var rateLimitedRequeue *time.Duration
+	if syncResult.RateLimitInfo != nil {
+		mcpRegistry.Status.RateLimitRemaining = &syncResult.RateLimitInfo.Remaining
+		if syncResult.RateLimitInfo.Remaining < 100 {
+			r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionRateLimited, metav1.ConditionTrue, "RateLimited",
+				fmt.Sprintf("GitHub API rate limit low: %d remaining, resets at %s",
+					syncResult.RateLimitInfo.Remaining, syncResult.RateLimitInfo.Reset.Format(time.RFC3339)))
+			r.Recorder.Event(mcpRegistry, corev1.EventTypeNormal, "RateLimited",
+				fmt.Sprintf("GitHub API rate limit low: %d remaining", syncResult.RateLimitInfo.Remaining))
 
-	// Update status
-	if err := r.StatusService.UpdateMCPRegistryStatus(ctx, registry); err != nil {
-		logger.Error(err, "Failed to update registry status")
+			// Calculate RetryAfter based on rate limit reset time
+			resetDelay := time.Until(syncResult.RateLimitInfo.Reset)
+			if resetDelay > 0 {
+				// Add buffer time to ensure reset has occurred
+				retryAfter := resetDelay + time.Minute*2
+				rateLimitedRequeue = &retryAfter
+				logger.V(1).Info("Rate limit hit, will retry after reset",
+					"retryAfter", retryAfter,
+					"resetTime", syncResult.RateLimitInfo.Reset)
+			}
+		} else {
+			r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionRateLimited, metav1.ConditionFalse, "RateLimitOK", "GitHub API rate limit is sufficient")
+		}
+	}
+
+	// Set successful conditions
+	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSyncing, metav1.ConditionFalse, "SyncCompleted", "Registry synchronization completed")
+	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReady, metav1.ConditionTrue, "SyncSuccessful",
+		fmt.Sprintf("Registry synchronized successfully, %d servers discovered", syncResult.ServersCount))
+	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionAuthFailed, metav1.ConditionFalse, "AuthSuccessful", "Authentication successful")
+
+	r.Recorder.Event(mcpRegistry, corev1.EventTypeNormal, "Synced",
+		fmt.Sprintf("Registry synchronized successfully, %d servers discovered", syncResult.ServersCount))
+
+	// Update final status
+	if err := r.updateStatus(ctx, mcpRegistry); err != nil {
+		logger.Error(err, "Failed to update final status")
 		return ctrl.Result{}, err
 	}
 
-	// Invalidate cache after status update to ensure fresh data on next access
-	if r.CacheService != nil {
-		cacheKey := fmt.Sprintf("registry:%s:%s", registry.Namespace, registry.Name)
-		r.CacheService.InvalidateRegistry(ctx, cacheKey)
-		// Also invalidate registry servers cache since the registry was updated
-		r.CacheService.InvalidateRegistryServers(ctx, registry.Name)
-	}
-
-	// Calculate next sync time
-	syncInterval := time.Hour * 24 // Default sync interval
-	if registry.Spec.SyncInterval != nil {
-		syncInterval = registry.Spec.SyncInterval.Duration
+	// Calculate next sync interval - use rate limit retry delay if rate limited, otherwise use RefreshInterval
+	var nextRequeue time.Duration
+	if rateLimitedRequeue != nil {
+		nextRequeue = *rateLimitedRequeue
+		logger.Info("Using rate limit retry delay for next reconciliation",
+			"retryAfter", nextRequeue)
+	} else {
+		nextRequeue = time.Minute * 15 // Default 15m as per issue requirements
+		if mcpRegistry.Spec.RefreshInterval != nil {
+			nextRequeue = mcpRegistry.Spec.RefreshInterval.Duration
+		}
 	}
 
 	logger.Info("Registry reconciliation completed successfully",
-		"phase", registry.Status.Phase,
-		"availableServers", registry.Status.AvailableServers,
-		"nextSync", syncInterval)
+		"phase", mcpRegistry.Status.Phase,
+		"serversDiscovered", mcpRegistry.Status.ServersDiscovered,
+		"nextSync", nextRequeue)
 
-	return ctrl.Result{RequeueAfter: syncInterval}, nil
+	return ctrl.Result{RequeueAfter: nextRequeue}, nil
 }
 
-// handleDeletion handles the deletion of MCPRegistry
-func (r *MCPRegistryReconciler) handleDeletion(ctx context.Context, logger logr.Logger, registry *mcpv1.MCPRegistry) (ctrl.Result, error) {
+// handleDeletion handles the deletion of a MCPRegistry
+func (r *MCPRegistryReconciler) handleDeletion(ctx context.Context, logger logr.Logger, mcpRegistry *mcpv1.MCPRegistry) (ctrl.Result, error) {
 	logger.Info("Handling MCPRegistry deletion")
 
-	// Invalidate cache entries before deletion
-	if r.CacheService != nil {
-		cacheKey := fmt.Sprintf("registry:%s:%s", registry.Namespace, registry.Name)
-		r.CacheService.InvalidateRegistry(ctx, cacheKey)
-		// Also invalidate registry servers cache
-		r.CacheService.InvalidateRegistryServers(ctx, registry.Name)
-		logger.V(1).Info("Invalidated cache entries for deleted MCPRegistry", "cacheKey", cacheKey)
+	// Clean up associated ConfigMaps
+	cacheManager := cache.NewCacheManager(r.Client)
+	if err := cacheManager.CleanupRegistry(ctx, mcpRegistry.Name, mcpRegistry.Namespace); err != nil {
+		logger.Error(err, "Failed to cleanup registry ConfigMaps")
+		// Continue with deletion even if cleanup fails
 	}
 
-	// Perform cleanup operations here if needed.
-	// For example, clean up cached registry data, notify dependent MCPServers, etc.
-
-	r.EventService.RecordNormal(registry, "Deleted", "MCPRegistry deleted successfully")
-
-	logger.Info("MCPRegistry deletion completed")
+	logger.Info("MCPRegistry deletion handled successfully")
 	return ctrl.Result{}, nil
+}
+
+// getAuthToken retrieves the authentication token from the secret if configured
+func (r *MCPRegistryReconciler) getAuthToken(ctx context.Context, mcpRegistry *mcpv1.MCPRegistry) (string, error) {
+	if mcpRegistry.Spec.Auth == nil || mcpRegistry.Spec.Auth.SecretRef == nil {
+		return "", nil // No authentication configured
+	}
+
+	secretRef := mcpRegistry.Spec.Auth.SecretRef
+	secret := &corev1.Secret{}
+
+	err := r.Get(ctx, types.NamespacedName{
+		Name:      secretRef.Name,
+		Namespace: mcpRegistry.Namespace,
+	}, secret)
+
+	if err != nil {
+		if errors.IsNotFound(err) && secretRef.Optional {
+			return "", nil // Optional secret not found
+		}
+		return "", fmt.Errorf("failed to get secret %s: %w", secretRef.Name, err)
+	}
+
+	token, ok := secret.Data[secretRef.Key]
+	if !ok {
+		return "", fmt.Errorf("key %s not found in secret %s", secretRef.Key, secretRef.Name)
+	}
+
+	return string(token), nil
+}
+
+// setCondition sets a condition on the MCPRegistry status
+func (r *MCPRegistryReconciler) setCondition(mcpRegistry *mcpv1.MCPRegistry, conditionType mcpv1.MCPRegistryConditionType, status metav1.ConditionStatus, reason, message string) {
+	now := metav1.Now()
+	condition := mcpv1.MCPRegistryCondition{
+		Type:               conditionType,
+		Status:             status,
+		LastTransitionTime: now,
+		Reason:             reason,
+		Message:            message,
+	}
+
+	// Find existing condition and update it
+	for i, existingCondition := range mcpRegistry.Status.Conditions {
+		if existingCondition.Type == conditionType {
+			if existingCondition.Status != status {
+				condition.LastTransitionTime = now
+			} else {
+				condition.LastTransitionTime = existingCondition.LastTransitionTime
+			}
+			mcpRegistry.Status.Conditions[i] = condition
+			return
+		}
+	}
+
+	// Condition not found, add it
+	mcpRegistry.Status.Conditions = append(mcpRegistry.Status.Conditions, condition)
+}
+
+// updateStatus updates the MCPRegistry status
+func (r *MCPRegistryReconciler) updateStatus(ctx context.Context, mcpRegistry *mcpv1.MCPRegistry) error {
+	return r.Status().Update(ctx, mcpRegistry)
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MCPRegistryReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return r.SetupWithManagerAndConcurrency(mgr, 3)
-}
-
-// SetupWithManagerAndConcurrency sets up the controller with the Manager and configurable concurrency.
-func (r *MCPRegistryReconciler) SetupWithManagerAndConcurrency(mgr ctrl.Manager, maxConcurrentReconciles int) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mcpv1.MCPRegistry{}).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: maxConcurrentReconciles,
-		}).
+		Owns(&corev1.ConfigMap{}).
 		Complete(r)
-}
-
-// GetRegistryByName retrieves a registry by name from the cluster
-func (r *MCPRegistryReconciler) GetRegistryByName(ctx context.Context, name, namespace string) (*mcpv1.MCPRegistry, error) {
-	registry := &mcpv1.MCPRegistry{}
-	key := types.NamespacedName{
-		Name:      name,
-		Namespace: namespace,
-	}
-
-	if err := r.Get(ctx, key, registry); err != nil {
-		return nil, err
-	}
-
-	return registry, nil
-}
-
-// ListRegistries lists all registries in the cluster
-func (r *MCPRegistryReconciler) ListRegistries(ctx context.Context, namespace string) (*mcpv1.MCPRegistryList, error) {
-	registryList := &mcpv1.MCPRegistryList{}
-	listOpts := []client.ListOption{}
-
-	if namespace != "" {
-		listOpts = append(listOpts, client.InNamespace(namespace))
-	}
-
-	if err := r.List(ctx, registryList, listOpts...); err != nil {
-		return nil, err
-	}
-
-	return registryList, nil
-}
-
-// GetRegistryByNameIndexed retrieves a registry by name using field indexer for efficient lookup with caching
-func (r *MCPRegistryReconciler) GetRegistryByNameIndexed(ctx context.Context, name, namespace string) (*mcpv1.MCPRegistry, error) {
-	// Create a cache key
-	cacheKey := fmt.Sprintf("registry:%s:%s", namespace, name)
-
-	// Try to get from the cache first
-	if r.CacheService != nil {
-		if cachedRegistry, found := r.CacheService.GetRegistry(ctx, cacheKey); found {
-			return cachedRegistry, nil
-		}
-	}
-
-	registryList := &mcpv1.MCPRegistryList{}
-	listOpts := []client.ListOption{
-		client.MatchingFields{"metadata.name": name},
-	}
-
-	if namespace != "" {
-		listOpts = append(listOpts, client.InNamespace(namespace))
-	}
-
-	if err := r.List(ctx, registryList, listOpts...); err != nil {
-		return nil, err
-	}
-
-	if len(registryList.Items) == 0 {
-		return nil, fmt.Errorf("registry %s not found in namespace %s", name, namespace)
-	}
-
-	if len(registryList.Items) > 1 {
-		return nil, fmt.Errorf("multiple registries found with name %s in namespace %s", name, namespace)
-	}
-
-	registry := &registryList.Items[0]
-
-	// Cache the result for 10 minutes
-	if r.CacheService != nil {
-		r.CacheService.SetRegistry(ctx, cacheKey, registry, 10*time.Minute)
-	}
-
-	return registry, nil
-}
-
-// ListMCPServersByRegistry lists all MCPServers that use a specific registry using field indexer with caching
-func (r *MCPRegistryReconciler) ListMCPServersByRegistry(ctx context.Context, registryName, namespace string) (*mcpv1.MCPServerList, error) {
-	// Try to get from the cache first
-	if r.CacheService != nil {
-		if cachedServers, found := r.CacheService.GetRegistryServers(ctx, registryName); found {
-			// Filter by namespace if specified
-			if namespace != "" {
-				filteredServers := make([]mcpv1.MCPServer, 0)
-				for _, server := range cachedServers {
-					if server.Namespace == namespace {
-						filteredServers = append(filteredServers, server)
-					}
-				}
-				return &mcpv1.MCPServerList{Items: filteredServers}, nil
-			}
-			return &mcpv1.MCPServerList{Items: cachedServers}, nil
-		}
-	}
-
-	mcpServerList := &mcpv1.MCPServerList{}
-	listOpts := []client.ListOption{
-		client.MatchingFields{"spec.registry.name": registryName},
-	}
-
-	if namespace != "" {
-		listOpts = append(listOpts, client.InNamespace(namespace))
-	}
-
-	if err := r.List(ctx, mcpServerList, listOpts...); err != nil {
-		return nil, err
-	}
-
-	// Cache the result for 5 minutes (shorter TTL for server lists as they change more frequently)
-	if r.CacheService != nil && len(mcpServerList.Items) > 0 {
-		r.CacheService.SetRegistryServers(ctx, registryName, mcpServerList.Items, 5*time.Minute)
-	}
-
-	return mcpServerList, nil
-}
-
-// TriggerRegistrySync manually triggers a registry sync
-func (r *MCPRegistryReconciler) TriggerRegistrySync(ctx context.Context, registry *mcpv1.MCPRegistry) error {
-	logger := log.FromContext(ctx).WithValues("mcpregistry", registry.Name)
-	logger.Info("Manually triggering registry sync")
-
-	// Update annotation to trigger reconciliation
-	if registry.Annotations == nil {
-		registry.Annotations = make(map[string]string)
-	}
-	registry.Annotations["mcp.allbeone.io/sync-trigger"] = time.Now().Format(time.RFC3339)
-
-	return r.Update(ctx, registry)
 }

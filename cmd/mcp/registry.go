@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -28,6 +29,7 @@ func newRegistryCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newRegistryListCmd())
+	cmd.AddCommand(newRegistryServersCmd())
 	cmd.AddCommand(newRegistrySearchCmd())
 	cmd.AddCommand(newRegistryInspectCmd())
 	cmd.AddCommand(newRegistryRefreshCmd())
@@ -94,6 +96,37 @@ The search will match server names and descriptions.`,
 	return cmd
 }
 
+func newRegistryServersCmd() *cobra.Command {
+	var (
+		timeout time.Duration
+		format  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "servers <registry>",
+		Short: "List servers from a specific registry cache",
+		Long: `List servers available in a specific MCP registry from the cached ConfigMaps in the cluster.
+This command reads from the registry cache ConfigMaps instead of accessing GitHub directly.`,
+		Example: `  # List servers from default registry
+  mcp registry servers default-registry
+
+  # List servers with JSON output
+  mcp registry servers my-registry --output json
+
+  # List servers with custom timeout
+  mcp registry servers my-registry --timeout 60s`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRegistryServers(args[0], timeout, format)
+		},
+	}
+
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "Timeout for Kubernetes operations")
+	cmd.Flags().StringVarP(&format, "output", "o", "table", "Output format (table, yaml, json)")
+
+	return cmd
+}
+
 func newRegistryInspectCmd() *cobra.Command {
 	var (
 		timeout time.Duration
@@ -128,30 +161,36 @@ capabilities, and configuration schema.`,
 }
 
 func runRegistryList(timeout time.Duration, format string) error {
-	client := registry.NewClient()
+	// Create Kubernetes client
+	k8sClient, err := createKubernetesClient("")
+	if err != nil {
+		return fmt.Errorf("failed to create Kubernetes client: %w", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	fmt.Println("Fetching MCP servers from registry...")
+	fmt.Println("Fetching MCPRegistry resources from cluster...")
 
-	servers, err := client.ListServers(ctx)
+	// List all MCPRegistry resources
+	registryList := &mcpv1.MCPRegistryList{}
+	err = k8sClient.List(ctx, registryList)
 	if err != nil {
-		return fmt.Errorf("failed to list servers from registry: %w", err)
+		return fmt.Errorf("failed to list MCPRegistry resources: %w", err)
 	}
 
-	if len(servers) == 0 {
-		fmt.Println("No servers found in the registry.")
+	if len(registryList.Items) == 0 {
+		fmt.Println("No MCPRegistry resources found in the cluster.")
 		return nil
 	}
 
 	switch format {
 	case "json":
-		return printServersJSON(servers)
+		return printRegistriesJSON(registryList.Items)
 	case "yaml":
-		return printServersYAML(servers)
+		return printRegistriesYAML(registryList.Items)
 	default:
-		return printServersTable(servers)
+		return printRegistriesTable(registryList.Items)
 	}
 }
 
@@ -181,6 +220,149 @@ func runRegistrySearch(query string, timeout time.Duration, format string) error
 	default:
 		return printServersTable(servers)
 	}
+}
+
+func runRegistryServers(registryName string, timeout time.Duration, format string) error {
+	// Create Kubernetes client
+	k8sClient, err := createKubernetesClient("")
+	if err != nil {
+		return fmt.Errorf("failed to create Kubernetes client: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	fmt.Printf("Fetching servers from registry '%s' cache...\n", registryName)
+
+	// First, find the MCPRegistry to get its namespace
+	registryList := &mcpv1.MCPRegistryList{}
+	err = k8sClient.List(ctx, registryList)
+	if err != nil {
+		return fmt.Errorf("failed to list MCPRegistry resources: %w", err)
+	}
+
+	var targetRegistry *mcpv1.MCPRegistry
+	for _, registry := range registryList.Items {
+		if registry.Name == registryName {
+			targetRegistry = &registry
+			break
+		}
+	}
+
+	if targetRegistry == nil {
+		return fmt.Errorf("registry '%s' not found in cluster", registryName)
+	}
+
+	// List ConfigMaps with registry label in the target namespace
+	configMaps := &corev1.ConfigMapList{}
+	err = k8sClient.List(ctx, configMaps,
+		client.InNamespace(targetRegistry.Namespace),
+		client.MatchingLabels{
+			"mcp.allbeone.io/registry": registryName,
+		})
+	if err != nil {
+		return fmt.Errorf("failed to list ConfigMaps for registry '%s': %w", registryName, err)
+	}
+
+	// Extract server information from ConfigMaps
+	var servers []string
+	var serverDetails []CachedServerInfo
+	for _, cm := range configMaps.Items {
+		if serverName, exists := cm.Labels["mcp.allbeone.io/server"]; exists {
+			servers = append(servers, serverName)
+
+			// Extract additional info if available
+			serverInfo := CachedServerInfo{
+				Name:          serverName,
+				Registry:      registryName,
+				Namespace:     cm.Namespace,
+				ConfigMapName: cm.Name,
+				LastUpdated:   cm.CreationTimestamp,
+			}
+
+			// Try to parse server.yaml content for description
+			if yamlContent, exists := cm.Data["server.yaml"]; exists && len(yamlContent) > 0 {
+				serverInfo.HasSpec = true
+			}
+
+			serverDetails = append(serverDetails, serverInfo)
+		}
+	}
+
+	if len(servers) == 0 {
+		fmt.Printf("No servers found in registry '%s' cache.\n", registryName)
+		return nil
+	}
+
+	switch format {
+	case "json":
+		return printCachedServersJSON(serverDetails)
+	case "yaml":
+		return printCachedServersYAML(serverDetails)
+	default:
+		return printCachedServersTable(serverDetails)
+	}
+}
+
+// CachedServerInfo represents server information from cache
+type CachedServerInfo struct {
+	Name          string      `json:"name"`
+	Registry      string      `json:"registry"`
+	Namespace     string      `json:"namespace"`
+	ConfigMapName string      `json:"configMapName"`
+	HasSpec       bool        `json:"hasSpec"`
+	LastUpdated   metav1.Time `json:"lastUpdated"`
+}
+
+func printCachedServersTable(servers []CachedServerInfo) error {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	defer func() {
+		if err := w.Flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error flushing output: %v\n", err)
+		}
+	}()
+
+	if _, err := fmt.Fprintln(w, "NAME\tREGISTRY\tNAMESPACE\tHAS-SPEC\tLAST-UPDATED"); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+	if _, err := fmt.Fprintln(w, "----\t--------\t---------\t--------\t------------"); err != nil {
+		return fmt.Errorf("failed to write separator: %w", err)
+	}
+
+	for _, server := range servers {
+		hasSpecStr := "false"
+		if server.HasSpec {
+			hasSpecStr = "true"
+		}
+
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			server.Name,
+			server.Registry,
+			server.Namespace,
+			hasSpecStr,
+			server.LastUpdated.Format("2006-01-02 15:04:05"),
+		); err != nil {
+			return fmt.Errorf("failed to write server info: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func printCachedServersJSON(servers []CachedServerInfo) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(servers)
+}
+
+func printCachedServersYAML(servers []CachedServerInfo) error {
+	encoder := yaml.NewEncoder(os.Stdout)
+	defer func() {
+		if err := encoder.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing YAML encoder: %v\n", err)
+		}
+	}()
+	return encoder.Encode(servers)
 }
 
 func runRegistryInspect(serverName string, timeout time.Duration, format string) error {
@@ -249,6 +431,57 @@ func printServersTable(servers []registry.MCPServerInfo) error {
 	}
 
 	return nil
+}
+
+func printRegistriesTable(registries []mcpv1.MCPRegistry) error {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	defer func() {
+		if err := w.Flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error flushing output: %v\n", err)
+		}
+	}()
+
+	if _, err := fmt.Fprintln(w, "NAME\tNAMESPACE\tPHASE\tSERVERS\tLAST SYNC"); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+	if _, err := fmt.Fprintln(w, "----\t---------\t-----\t-------\t---------"); err != nil {
+		return fmt.Errorf("failed to write separator: %w", err)
+	}
+
+	for _, registry := range registries {
+		lastSync := "Never"
+		if registry.Status.LastSyncTime != nil {
+			lastSync = registry.Status.LastSyncTime.Format("2006-01-02 15:04:05")
+		}
+
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n",
+			registry.Name,
+			registry.Namespace,
+			registry.Status.Phase,
+			registry.Status.ServersDiscovered,
+			lastSync,
+		); err != nil {
+			return fmt.Errorf("failed to write registry info: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func printRegistriesJSON(registries []mcpv1.MCPRegistry) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(registries)
+}
+
+func printRegistriesYAML(registries []mcpv1.MCPRegistry) error {
+	encoder := yaml.NewEncoder(os.Stdout)
+	defer func() {
+		if err := encoder.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing YAML encoder: %v\n", err)
+		}
+	}()
+	return encoder.Encode(registries)
 }
 
 func printServersJSON(servers []registry.MCPServerInfo) error {

@@ -25,6 +25,9 @@ type RegistryService interface {
 	// ForceEnrichMCPServer enriches MCPServer with registry data, bypassing "already enriched" check
 	ForceEnrichMCPServer(ctx context.Context, mcpServer *mcpv1.MCPServer, registryName string) error
 
+	// EnrichMCPServerFromCache enriches MCPServer with registry data from ConfigMap cache
+	EnrichMCPServerFromCache(ctx context.Context, mcpServer *mcpv1.MCPServer) error
+
 	// SyncRegistry synchronizes registry data
 	SyncRegistry(ctx context.Context, registry *mcpv1.MCPRegistry) error
 
@@ -112,6 +115,12 @@ type ResourceBuilderService interface {
 
 	// BuildService builds a service for MCPServer
 	BuildService(mcpServer *mcpv1.MCPServer) *corev1.Service
+
+	// BuildConfigMap builds a config map for MCPServer
+	BuildConfigMap(mcpServer *mcpv1.MCPServer) *corev1.ConfigMap
+
+	// BuildSecret builds a secret for MCPServer
+	BuildSecret(mcpServer *mcpv1.MCPServer) *corev1.Secret
 
 	// BuildHPA builds horizontal pod autoscaler for MCPServer
 	BuildHPA(mcpServer *mcpv1.MCPServer) *autoscalingv2.HorizontalPodAutoscaler

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -237,22 +238,203 @@ func (c *Client) GetServerSpec(ctx context.Context, serverName string) (*MCPServ
 	return spec, nil
 }
 
-// parseYAMLContent парсит YAML содержимое (простая реализация)
+// parseYAMLContent парсит YAML содержимое используя proper YAML unmarshaling
 func (c *Client) parseYAMLContent(content []byte) (*MCPServerSpec, error) {
-	// Простой парсинг основных полей из YAML
 	spec := &MCPServerSpec{}
 
-	lines := strings.Split(string(content), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "name:") {
-			spec.Name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
-		} else if strings.HasPrefix(line, "version:") {
-			spec.Version = strings.TrimSpace(strings.TrimPrefix(line, "version:"))
-		} else if strings.HasPrefix(line, "description:") {
-			spec.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+	if err := yaml.Unmarshal(content, spec); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal YAML content: %w", err)
+	}
+
+	return spec, nil
+}
+
+// extractRateLimitInfo извлекает информацию о rate limit из GitHub API response headers
+func (c *Client) extractRateLimitInfo(resp *http.Response) *RateLimitInfo {
+	if resp == nil {
+		return nil
+	}
+
+	limitHeader := resp.Header.Get("X-RateLimit-Limit")
+	remainingHeader := resp.Header.Get("X-RateLimit-Remaining")
+	resetHeader := resp.Header.Get("X-RateLimit-Reset")
+
+	if limitHeader == "" || remainingHeader == "" || resetHeader == "" {
+		return nil
+	}
+
+	limit, err := strconv.ParseInt(limitHeader, 10, 32)
+	if err != nil {
+		return nil
+	}
+
+	remaining, err := strconv.ParseInt(remainingHeader, 10, 32)
+	if err != nil {
+		return nil
+	}
+
+	reset, err := strconv.ParseInt(resetHeader, 10, 64)
+	if err != nil {
+		return nil
+	}
+
+	return &RateLimitInfo{
+		Limit:     int32(limit),
+		Remaining: int32(remaining),
+		Reset:     time.Unix(reset, 0),
+	}
+}
+
+// listServersWithRateLimit получает список серверов и извлекает rate limit информацию
+func (c *Client) listServersWithRateLimit(ctx context.Context, rateLimitInfo **RateLimitInfo) ([]MCPServerInfo, error) {
+	var servers []MCPServerInfo
+
+	err := c.githubRetrier.DoWithGitHubRetry(ctx, "list_servers", func(ctx context.Context) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
-		// Добавить парсинг других полей по необходимости
+
+		req.Header.Set("User-Agent", c.userAgent)
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+		if c.githubToken != "" {
+			req.Header.Set("Authorization", "token "+c.githubToken)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return resp, fmt.Errorf("failed to execute request: %w", err)
+		}
+
+		// Extract rate limit information
+		if *rateLimitInfo == nil {
+			*rateLimitInfo = c.extractRateLimitInfo(resp)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return resp, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		}
+
+		var registryResponse []RegistryResponse
+		if err := json.NewDecoder(resp.Body).Decode(&registryResponse); err != nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+			}
+			return resp, fmt.Errorf("failed to decode response: %w", err)
+		}
+
+		for _, item := range registryResponse {
+			if item.Type == "dir" {
+				servers = append(servers, MCPServerInfo{
+					Name:        item.Name,
+					Path:        item.Path,
+					Size:        item.Size,
+					DownloadURL: item.DownloadURL,
+					HTMLURL:     item.HTMLURL,
+				})
+			}
+		}
+
+		if err := resp.Body.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", err)
+		}
+		return resp, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return servers, nil
+}
+
+// getServerSpecWithRateLimit получает спецификацию сервера и обновляет rate limit информацию
+func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName string, rateLimitInfo **RateLimitInfo) (*MCPServerSpec, error) {
+	var spec *MCPServerSpec
+
+	err := c.githubRetrier.DoWithGitHubRetry(ctx, "get_server_spec", func(ctx context.Context) (*http.Response, error) {
+		specURL := fmt.Sprintf("%s/%s/server.yaml", c.baseURL, serverName)
+
+		req, err := http.NewRequestWithContext(ctx, "GET", specURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("User-Agent", c.userAgent)
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+		if c.githubToken != "" {
+			req.Header.Set("Authorization", "token "+c.githubToken)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return resp, fmt.Errorf("failed to execute request: %w", err)
+		}
+
+		// Update rate limit information with most recent data
+		*rateLimitInfo = c.extractRateLimitInfo(resp)
+
+		if resp.StatusCode == http.StatusNotFound {
+			return resp, fmt.Errorf("server %s not found in registry", serverName)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return resp, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		}
+
+		var fileResponse RegistryResponse
+		if err := json.NewDecoder(resp.Body).Decode(&fileResponse); err != nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+			}
+			return resp, fmt.Errorf("failed to decode response: %w", err)
+		}
+
+		content, err := base64.StdEncoding.DecodeString(fileResponse.Content)
+		if err != nil {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+			}
+			return resp, fmt.Errorf("failed to decode file content: %w", err)
+		}
+
+		hash := sha256.Sum256(content)
+		templateDigest := hex.EncodeToString(hash[:])
+
+		var parsedSpec MCPServerSpec
+		if err := json.Unmarshal(content, &parsedSpec); err != nil {
+			if strings.Contains(string(content), "name:") {
+				spec, err = c.parseYAMLContent(content)
+				if err != nil {
+					if closeErr := resp.Body.Close(); closeErr != nil {
+						fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+					}
+					return resp, err
+				}
+			} else {
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+				}
+				return resp, fmt.Errorf("failed to parse server spec: %w", err)
+			}
+		} else {
+			spec = &parsedSpec
+		}
+
+		if spec != nil {
+			spec.TemplateDigest = templateDigest
+		}
+
+		if err := resp.Body.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", err)
+		}
+		return resp, nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
 	return spec, nil
@@ -362,4 +544,72 @@ func (c *Client) HasLocalRegistry(registryPath string) bool {
 	serversDir := filepath.Join(registryPath, "servers")
 	_, err := os.Stat(serversDir)
 	return err == nil
+}
+
+// SyncRepository синхронизирует серверы из указанного GitHub репозитория
+func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*SyncResult, error) {
+	// Создаем новый клиент с настройками для конкретного репозитория
+	repoClient := &Client{
+		httpClient:    c.httpClient,
+		userAgent:     c.userAgent,
+		githubRetrier: c.githubRetrier,
+		githubToken:   repo.AuthToken,
+	}
+
+	// Формируем URL для GitHub API
+	path := "servers"
+	if repo.Path != "" {
+		path = strings.TrimPrefix(repo.Path, "/")
+		if !strings.HasSuffix(path, "/") {
+			path += "/"
+		}
+		path += "servers"
+	}
+
+	branch := repo.Branch
+	if branch == "" {
+		branch = "main"
+	}
+
+	repoClient.baseURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s",
+		repo.Owner, repo.Name, path, branch)
+
+	// Получаем список серверов и rate limit info
+	var rateLimitInfo *RateLimitInfo
+	servers, err := repoClient.listServersWithRateLimit(ctx, &rateLimitInfo)
+	if err != nil {
+		return &SyncResult{
+			Errors:        []string{fmt.Sprintf("failed to list servers: %v", err)},
+			RateLimitInfo: rateLimitInfo,
+		}, err
+	}
+
+	// Получаем спецификации для каждого сервера
+	serverSpecs := make(map[string]*MCPServerSpec)
+	var syncErrors []string
+	observedSHA := ""
+
+	for _, server := range servers {
+		spec, err := repoClient.getServerSpecWithRateLimit(ctx, server.Name, &rateLimitInfo)
+		if err != nil {
+			syncErrors = append(syncErrors, fmt.Sprintf("failed to get spec for %s: %v", server.Name, err))
+			continue
+		}
+		serverSpecs[server.Name] = spec
+		// Используем первый успешно полученный SHA как observedSHA
+		if observedSHA == "" && spec.TemplateDigest != "" {
+			observedSHA = spec.TemplateDigest
+		}
+	}
+
+	result := &SyncResult{
+		Servers:       servers,
+		ServerSpecs:   serverSpecs,
+		ObservedSHA:   observedSHA,
+		ServersCount:  int32(len(servers)),
+		Errors:        syncErrors,
+		RateLimitInfo: rateLimitInfo,
+	}
+
+	return result, nil
 }

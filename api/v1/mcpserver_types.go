@@ -870,8 +870,14 @@ type MCPServerSpec struct {
 
 // MCPRegistryInfo содержит информацию о сервере из реестра
 type MCPRegistryInfo struct {
-	// Name название сервера в реестре
-	Name string `json:"name"`
+	// RegistryName название MCPRegistry в том же namespace
+	RegistryName string `json:"registryName"`
+
+	// ServerName имя сервера в реестре
+	ServerName string `json:"serverName"`
+
+	// Name название сервера в реестре (устаревшее, используйте ServerName)
+	Name string `json:"name,omitempty"`
 
 	// Version версия сервера
 	Version string `json:"version,omitempty"`
@@ -1030,6 +1036,7 @@ const (
 //+kubebuilder:printcolumn:name="ReadyReplicas",type=integer,JSONPath=`.status.readyReplicas`
 //+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 //+kubebuilder:printcolumn:name="Endpoint",type=string,JSONPath=`.status.serviceEndpoint`
+//+kubebuilder:printcolumn:name="RegistryFetched",type=string,JSONPath=".status.conditions[?(@.type=='RegistryFetched')].status"
 //+kubebuilder:printcolumn:name="Rendered",type=string,JSONPath=".status.conditions[?(@.type=='Rendered')].status"
 //+kubebuilder:printcolumn:name="Applied",type=string,JSONPath=".status.conditions[?(@.type=='Applied')].status"
 //+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"

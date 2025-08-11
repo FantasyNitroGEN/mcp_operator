@@ -13,7 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
-	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
 )
 
 func newDeployCmd() *cobra.Command {
@@ -25,6 +24,7 @@ func newDeployCmd() *cobra.Command {
 		dryRun      bool
 		wait        bool
 		waitTimeout time.Duration
+		registry    string
 		// Autoscaling flags
 		autoscale   bool
 		minReplicas int32
@@ -72,7 +72,7 @@ enrich with registry data and deploy as a running server.`,
   mcp deploy filesystem-server --wait --wait-timeout 5m`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeploy(args[0], namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU, envVars, envFromSecrets)
+			return runDeploy(args[0], registry, namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU, envVars, envFromSecrets)
 		},
 	}
 
@@ -83,6 +83,7 @@ enrich with registry data and deploy as a running server.`,
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the resource that would be created without actually creating it")
 	cmd.Flags().BoolVar(&wait, "wait", false, "Wait for the deployment to be ready")
 	cmd.Flags().DurationVar(&waitTimeout, "wait-timeout", 5*time.Minute, "Timeout for waiting for deployment to be ready")
+	cmd.Flags().StringVar(&registry, "registry", "", "Registry name to deploy server from (required)")
 
 	// Autoscaling flags
 	cmd.Flags().BoolVar(&autoscale, "autoscale", false, "Enable horizontal pod autoscaling")
@@ -97,21 +98,13 @@ enrich with registry data and deploy as a running server.`,
 	return cmd
 }
 
-func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string) error {
-	// First, verify the server exists in the registry
-	fmt.Printf("Verifying server '%s' exists in registry...\n", serverName)
-
-	registryClient := registry.NewClient()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	// Try to get server spec to verify it exists
-	_, err := registryClient.GetServerSpec(ctx, serverName)
-	if err != nil {
-		return fmt.Errorf("server '%s' not found in registry: %w", serverName, err)
+func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string) error {
+	// Validate that registry name is provided
+	if registryName == "" {
+		return fmt.Errorf("registry name is required, use --registry flag")
 	}
 
-	fmt.Printf("✓ Server '%s' found in registry\n", serverName)
+	fmt.Printf("Creating MCPServer '%s' from registry '%s'...\n", serverName, registryName)
 
 	// Parse environment variables
 	envMap := make(map[string]string)
@@ -151,7 +144,8 @@ func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, 
 		},
 		Spec: mcpv1.MCPServerSpec{
 			Registry: mcpv1.MCPRegistryInfo{
-				Name: serverName,
+				RegistryName: registryName,
+				ServerName:   serverName,
 			},
 			Runtime: mcpv1.MCPRuntimeSpec{
 				Type: "docker", // Default to docker, will be enriched from registry
@@ -193,7 +187,7 @@ func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, 
 	// Create the MCPServer resource
 	fmt.Printf("Creating MCPServer resource '%s' in namespace '%s'...\n", serverName, namespace)
 
-	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	err = k8sClient.Create(ctx, mcpServer)
@@ -257,7 +251,8 @@ metadata:
     mcp.allbeone.io/deployed-at: %s
 spec:
   registry:
-    name: %s
+    registryName: %s
+    serverName: %s
   runtime:
     type: %s`,
 		"mcp.allbeone.io/v1",
@@ -270,7 +265,8 @@ spec:
 		mcpServer.Labels["app.kubernetes.io/created-by"],
 		mcpServer.Annotations["mcp.allbeone.io/deployed-by"],
 		mcpServer.Annotations["mcp.allbeone.io/deployed-at"],
-		mcpServer.Spec.Registry.Name,
+		mcpServer.Spec.Registry.RegistryName,
+		mcpServer.Spec.Registry.ServerName,
 		mcpServer.Spec.Runtime.Type,
 	)
 
@@ -325,11 +321,18 @@ func waitForMCPServerReady(k8sClient client.Client, name, namespace string, time
 				continue
 			}
 
-			fmt.Printf("⏳ MCPServer status: %s", mcpServer.Status.Phase)
+			// Display conditions status
+			registryFetched := getConditionStatus(mcpServer, mcpv1.MCPServerConditionRegistryFetched)
+			rendered := getConditionStatus(mcpServer, mcpv1.MCPServerConditionRendered)
+			applied := getConditionStatus(mcpServer, mcpv1.MCPServerConditionApplied)
+			ready := getConditionStatus(mcpServer, mcpv1.MCPServerConditionReady)
+
+			fmt.Printf("⏳ MCPServer status: %s\n", mcpServer.Status.Phase)
+			fmt.Printf("   RegistryFetched: %s | Rendered: %s | Applied: %s | Ready: %s\n",
+				registryFetched, rendered, applied, ready)
 			if mcpServer.Status.Message != "" {
-				fmt.Printf(" - %s", mcpServer.Status.Message)
+				fmt.Printf("   Message: %s\n", mcpServer.Status.Message)
 			}
-			fmt.Println()
 
 			if mcpServer.Status.Phase == mcpv1.MCPServerPhaseRunning && mcpServer.Status.ReadyReplicas > 0 {
 				fmt.Printf("✓ MCPServer '%s' is ready!\n", name)
@@ -344,4 +347,21 @@ func waitForMCPServerReady(k8sClient client.Client, name, namespace string, time
 			}
 		}
 	}
+}
+
+// getConditionStatus returns the status of a specific condition type
+func getConditionStatus(mcpServer *mcpv1.MCPServer, conditionType mcpv1.MCPServerConditionType) string {
+	for _, condition := range mcpServer.Status.Conditions {
+		if condition.Type == conditionType {
+			switch condition.Status {
+			case "True":
+				return "True"
+			case "False":
+				return "False"
+			default:
+				return "Unknown"
+			}
+		}
+	}
+	return "Unknown"
 }

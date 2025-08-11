@@ -154,7 +154,7 @@ func main() {
 		},
 	}
 
-	registryService := services.NewDefaultRegistryServiceWithRetryConfig(githubRetryConfig)
+	registryService := services.NewDefaultRegistryServiceWithRetryConfig(mgr.GetClient(), githubRetryConfig)
 	statusService := services.NewDefaultStatusService(kubernetesClient)
 	validationService := services.NewDefaultValidationService(kubernetesClient)
 	retryService := services.NewDefaultRetryService()
@@ -166,15 +166,10 @@ func main() {
 
 	setupLog.Info("Setting up MCPRegistry controller", "maxConcurrentReconciles", maxConcurrentReconcilesMCPRegistry)
 	if err = (&controllers.MCPRegistryReconciler{
-		Client:            mgr.GetClient(),
-		Scheme:            mgr.GetScheme(),
-		RegistryService:   registryService,
-		StatusService:     statusService,
-		ValidationService: validationService,
-		RetryService:      retryService,
-		EventService:      eventService,
-		CacheService:      cacheService,
-	}).SetupWithManagerAndConcurrency(mgr, maxConcurrentReconcilesMCPRegistry); err != nil {
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("mcpregistry-controller"),
+	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPRegistry")
 		os.Exit(1)
 	}
