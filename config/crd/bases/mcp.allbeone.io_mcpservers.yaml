@@ -22,13 +22,22 @@ spec:
       name: Replicas
       type: integer
     - jsonPath: .status.readyReplicas
-      name: Ready
+      name: ReadyReplicas
       type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     - jsonPath: .status.serviceEndpoint
       name: Endpoint
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Rendered')].status
+      name: Rendered
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Applied')].status
+      name: Applied
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
       type: string
     name: v1
     schema:
@@ -2825,6 +2834,24 @@ spec:
                 description: Replicas текущее количество реплик
                 format: int32
                 type: integer
+              resolvedConfigMap:
+                description: ResolvedConfigMap ссылка на ConfigMap с отрендеренной
+                  конфигурацией
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              resolvedHash:
+                description: ResolvedHash хэш отрендеренной конфигурации
+                type: string
               serviceEndpoint:
                 description: ServiceEndpoint endpoint для подключения к серверу
                 type: string

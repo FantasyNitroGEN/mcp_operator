@@ -22,6 +22,7 @@ import (
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/metrics"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/render"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/services"
 )
 
@@ -48,6 +49,7 @@ type MCPServerReconciler struct {
 	EventService      services.EventService
 	AutoUpdateService services.AutoUpdateService
 	CacheService      services.CacheService
+	RendererService   render.RendererService
 }
 
 // +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpservers,verbs=get;list;watch;create;update;patch;delete
@@ -59,7 +61,7 @@ type MCPServerReconciler struct {
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.istio.io,resources=virtualservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.istio.io,resources=destinationrules,verbs=get;list;watch;create;update;patch;delete
@@ -230,120 +232,137 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// Render resources to YAML and create ConfigMap
+	logger.Info("Rendering resources to YAML")
+	renderStartTime := time.Now()
+
+	resources, yamlContent, err := r.RendererService.RenderResources(mcpServer)
+	if err != nil {
+		logger.Error(err, "Failed to render resources to YAML")
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRendered,
+			string(metav1.ConditionFalse), "RenderingFailed", fmt.Sprintf("Failed to render resources: %v", err))
+		r.EventService.RecordWarning(mcpServer, "RenderingFailed", fmt.Sprintf("Failed to render resources: %v", err))
+
+		// Update status and return without requeue - rendering errors are likely spec issues
+		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
+			logger.Error(statusErr, "Failed to update MCPServer status")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Calculate hash of rendered content
+	renderedHash := r.RendererService.CalculateHash(yamlContent)
+
+	// Create or update ConfigMap with rendered manifests
+	configMapName := fmt.Sprintf("mcpserver-%s-rendered", mcpServer.Name)
+	// Truncate to 63 characters if needed (Kubernetes name limit)
+	if len(configMapName) > 63 {
+		configMapName = configMapName[:63]
+	}
+
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      configMapName,
+			Namespace: mcpServer.Namespace,
+			Labels: map[string]string{
+				"mcp.allbeone.io/name":      mcpServer.Name,
+				"mcp.allbeone.io/namespace": mcpServer.Namespace,
+				"mcp.allbeone.io/component": "rendered-manifests",
+			},
+		},
+		Data: map[string]string{
+			"manifests.yaml": yamlContent,
+		},
+	}
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(mcpServer, configMap, r.Scheme); err != nil {
+		logger.Error(err, "Failed to set controller reference for ConfigMap")
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRendered,
+			string(metav1.ConditionFalse), "ConfigMapOwnerRefFailed", fmt.Sprintf("Failed to set owner reference: %v", err))
+		r.EventService.RecordWarning(mcpServer, "ConfigMapOwnerRefFailed", fmt.Sprintf("Failed to set owner reference: %v", err))
+
+		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
+			logger.Error(statusErr, "Failed to update MCPServer status")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Create or update the ConfigMap
+	if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
+		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, configMap, func() error {
+			// Update data on each reconciliation
+			configMap.Data = map[string]string{
+				"manifests.yaml": yamlContent,
+			}
+			return nil
+		})
+		return err
+	}); err != nil {
+		logger.Error(err, "Failed to create or update rendered ConfigMap")
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRendered,
+			string(metav1.ConditionFalse), "ConfigMapCreateFailed", fmt.Sprintf("Failed to create ConfigMap: %v", err))
+		r.EventService.RecordWarning(mcpServer, "ConfigMapCreateFailed", fmt.Sprintf("Failed to create ConfigMap: %v", err))
+
+		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
+			logger.Error(statusErr, "Failed to update MCPServer status")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Update MCPServer status with rendered information
+	mcpServer.Status.ResolvedHash = renderedHash
+	mcpServer.Status.ResolvedConfigMap = &corev1.LocalObjectReference{
+		Name: configMapName,
+	}
+
+	// Set successful rendering condition
+	resourceCount := len(resources)
+	r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRendered,
+		string(metav1.ConditionTrue), "Assembled", fmt.Sprintf("resources=%d", resourceCount))
+	r.EventService.RecordNormal(mcpServer, "Rendered", fmt.Sprintf("Successfully rendered %d resources to ConfigMap %s", resourceCount, configMapName))
+
+	logger.Info("Successfully rendered resources and created ConfigMap",
+		"configMapName", configMapName,
+		"resourceCount", resourceCount,
+		"hash", renderedHash,
+		"duration", time.Since(renderStartTime),
+	)
+
 	// Set MCPServer phase to pending
 	mcpServer.Status.Phase = mcpv1.MCPServerPhasePending
 	r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
 		string(metav1.ConditionTrue), "DeploymentInProgress", "MCPServer deployment in progress")
 
-	// Create or update deployment with retry
+	// Apply rendered resources using Server-Side Apply
+	logger.Info("Applying rendered resources using Server-Side Apply")
+	applyStartTime := time.Now()
+
 	if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
-		_, err := r.DeploymentService.CreateOrUpdateDeployment(ctx, mcpServer)
-		return err
+		return r.applyRenderedResources(ctx, logger, mcpServer, resources, configMapName, renderedHash)
 	}); err != nil {
-		logger.Error(err, "Failed to create or update deployment")
+		logger.Error(err, "Failed to apply rendered resources")
 		mcpServer.Status.Phase = mcpv1.MCPServerPhaseFailed
-		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
-			string(metav1.ConditionFalse), "DeploymentFailed", fmt.Sprintf("Failed to create deployment: %v", err))
-		r.EventService.RecordWarning(mcpServer, "DeploymentFailed", fmt.Sprintf("Failed to create deployment: %v", err))
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionApplied,
+			string(metav1.ConditionFalse), "ApplyFailed", fmt.Sprintf("Failed to apply resources: %v", err))
+		r.EventService.RecordWarning(mcpServer, "ApplyFailed", fmt.Sprintf("Failed to apply resources: %v", err))
 
-		// Update status once and return without requeue - deployment errors will be retried on next event
+		// Update status once and return without requeue - apply errors will be retried on next event
 		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
 			logger.Error(statusErr, "Failed to update MCPServer status")
 		}
 		return ctrl.Result{}, nil
 	}
 
-	// Create or update service with retry
-	if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
-		_, err := r.DeploymentService.CreateOrUpdateService(ctx, mcpServer)
-		return err
-	}); err != nil {
-		logger.Error(err, "Failed to create or update service")
-		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
-			string(metav1.ConditionFalse), "ServiceFailed", fmt.Sprintf("Failed to create service: %v", err))
-		r.EventService.RecordWarning(mcpServer, "ServiceFailed", fmt.Sprintf("Failed to create service: %v", err))
+	// Set successful apply condition
+	r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionApplied,
+		string(metav1.ConditionTrue), "Applied", fmt.Sprintf("Successfully applied %d resources", len(resources)))
+	r.EventService.RecordNormal(mcpServer, "Applied", fmt.Sprintf("Successfully applied %d resources using Server-Side Apply", len(resources)))
 
-		// Update status once and return without requeue - service errors will be retried on next event
-		if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
-			logger.Error(statusErr, "Failed to update MCPServer status")
-		}
-		return ctrl.Result{}, nil
-	}
-
-	// Create or update Istio resources if enabled
-	if mcpServer.Spec.Istio != nil && mcpServer.Spec.Istio.Enabled {
-		logger.Info("Creating or updating Istio resources")
-
-		// Create or update VirtualService if configured
-		if mcpServer.Spec.Istio.VirtualService != nil {
-			if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
-				_, err := r.DeploymentService.CreateOrUpdateVirtualService(ctx, mcpServer)
-				return err
-			}); err != nil {
-				logger.Error(err, "Failed to create or update VirtualService")
-				r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
-					string(metav1.ConditionFalse), "VirtualServiceFailed", fmt.Sprintf("Failed to create VirtualService: %v", err))
-				r.EventService.RecordWarning(mcpServer, "VirtualServiceFailed", fmt.Sprintf("Failed to create VirtualService: %v", err))
-				// Don't fail the entire reconciliation for VirtualService issues
-			} else {
-				logger.Info("Successfully created or updated VirtualService")
-				r.EventService.RecordNormal(mcpServer, "VirtualServiceReady", "VirtualService created or updated successfully")
-			}
-		}
-
-		// Create or update DestinationRule if configured
-		if mcpServer.Spec.Istio.DestinationRule != nil {
-			if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
-				_, err := r.DeploymentService.CreateOrUpdateDestinationRule(ctx, mcpServer)
-				return err
-			}); err != nil {
-				logger.Error(err, "Failed to create or update DestinationRule")
-				r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionReady,
-					string(metav1.ConditionFalse), "DestinationRuleFailed", fmt.Sprintf("Failed to create DestinationRule: %v", err))
-				r.EventService.RecordWarning(mcpServer, "DestinationRuleFailed", fmt.Sprintf("Failed to create DestinationRule: %v", err))
-				// Don't fail the entire reconciliation for DestinationRule issues
-			} else {
-				logger.Info("Successfully created or updated DestinationRule")
-				r.EventService.RecordNormal(mcpServer, "DestinationRuleReady", "DestinationRule created or updated successfully")
-			}
-		}
-	}
-
-	// Create or update HPA if autoscaling is enabled
-	if mcpServer.Spec.Autoscaling != nil && mcpServer.Spec.Autoscaling.HPA != nil {
-		if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
-			_, err := r.DeploymentService.CreateOrUpdateHPA(ctx, mcpServer)
-			return err
-		}); err != nil {
-			logger.Error(err, "Failed to create or update HPA")
-			r.EventService.RecordWarning(mcpServer, "HPAFailed", fmt.Sprintf("Failed to create HPA: %v", err))
-			// Don't fail the entire reconciliation for HPA issues
-		}
-	}
-
-	// Create or update VPA if autoscaling is enabled
-	if mcpServer.Spec.Autoscaling != nil && mcpServer.Spec.Autoscaling.VPA != nil {
-		if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
-			_, err := r.DeploymentService.CreateOrUpdateVPA(ctx, mcpServer)
-			return err
-		}); err != nil {
-			logger.Error(err, "Failed to create or update VPA")
-			r.EventService.RecordWarning(mcpServer, "VPAFailed", fmt.Sprintf("Failed to create VPA: %v", err))
-			// Don't fail the entire reconciliation for VPA issues
-		}
-	}
-
-	// Create or update network policy if multi-tenancy is enabled
-	if mcpServer.Spec.Tenancy != nil && mcpServer.Spec.Tenancy.NetworkPolicy != nil {
-		if err := r.RetryService.RetryDeploymentOperation(ctx, func() error {
-			_, err := r.DeploymentService.CreateOrUpdateNetworkPolicy(ctx, mcpServer)
-			return err
-		}); err != nil {
-			logger.Error(err, "Failed to create or update network policy")
-			r.EventService.RecordWarning(mcpServer, "NetworkPolicyFailed", fmt.Sprintf("Failed to create network policy: %v", err))
-			// Don't fail the entire reconciliation for network policy issues
-		}
-	}
+	logger.Info("Successfully applied rendered resources",
+		"resourceCount", len(resources),
+		"duration", time.Since(applyStartTime),
+	)
 
 	// Check deployment status and update conditions with enhanced rolling update tracking
 	deployment, err := r.DeploymentService.GetDeploymentStatus(ctx, mcpServer)
@@ -596,6 +615,59 @@ func (r *MCPServerReconciler) ListMCPServersEfficient(ctx context.Context, names
 }
 
 // isDeploymentRollingUpdate determines if a deployment is currently performing a rolling update
+// applyRenderedResources applies all rendered resources using Server-Side Apply
+func (r *MCPServerReconciler) applyRenderedResources(ctx context.Context, logger logr.Logger, mcpServer *mcpv1.MCPServer, resources []client.Object, configMapName, renderedHash string) error {
+	fieldManager := "mcp-operator"
+
+	for _, resource := range resources {
+		// Add required labels
+		labels := resource.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels["mcp.allbeone.io/name"] = mcpServer.Name
+		labels["mcp.allbeone.io/hash"] = renderedHash
+		resource.SetLabels(labels)
+
+		// Add required annotation
+		annotations := resource.GetAnnotations()
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+		annotations["mcp.allbeone.io/rendered-cm"] = configMapName
+		resource.SetAnnotations(annotations)
+
+		// Set owner reference for proper cleanup
+		if err := controllerutil.SetControllerReference(mcpServer, resource, r.Scheme); err != nil {
+			logger.Error(err, "Failed to set controller reference for resource",
+				"resource", resource.GetObjectKind().GroupVersionKind().String(),
+				"name", resource.GetName(),
+			)
+			return fmt.Errorf("failed to set controller reference for %s/%s: %w",
+				resource.GetObjectKind().GroupVersionKind().Kind, resource.GetName(), err)
+		}
+
+		// Apply the resource using Server-Side Apply
+		if err := r.Patch(ctx, resource, client.Apply, client.ForceOwnership, client.FieldOwner(fieldManager)); err != nil {
+			logger.Error(err, "Failed to apply resource using Server-Side Apply",
+				"resource", resource.GetObjectKind().GroupVersionKind().String(),
+				"name", resource.GetName(),
+				"namespace", resource.GetNamespace(),
+			)
+			return fmt.Errorf("failed to apply %s/%s: %w",
+				resource.GetObjectKind().GroupVersionKind().Kind, resource.GetName(), err)
+		}
+
+		logger.V(1).Info("Successfully applied resource using Server-Side Apply",
+			"resource", resource.GetObjectKind().GroupVersionKind().String(),
+			"name", resource.GetName(),
+			"namespace", resource.GetNamespace(),
+		)
+	}
+
+	return nil
+}
+
 func (r *MCPServerReconciler) isDeploymentRollingUpdate(deployment *appsv1.Deployment) bool {
 	if deployment == nil {
 		return false

@@ -21,6 +21,7 @@ import (
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/controllers"
+	"github.com/FantasyNitroGEN/mcp_operator/pkg/render"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/retry"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/services"
 	mcpwebhook "github.com/FantasyNitroGEN/mcp_operator/pkg/webhook"
@@ -161,6 +162,7 @@ func main() {
 	deploymentService := services.NewDefaultDeploymentService(mgr.GetClient(), resourceBuilder, kubernetesClient)
 	autoUpdateService := services.NewDefaultAutoUpdateService(mgr.GetClient(), registryService, statusService, eventService)
 	cacheService := services.NewDefaultCacheService()
+	rendererService := render.NewDefaultRendererService(resourceBuilder)
 
 	setupLog.Info("Setting up MCPRegistry controller", "maxConcurrentReconciles", maxConcurrentReconcilesMCPRegistry)
 	if err = (&controllers.MCPRegistryReconciler{
@@ -189,6 +191,7 @@ func main() {
 		EventService:      eventService,
 		AutoUpdateService: autoUpdateService,
 		CacheService:      cacheService,
+		RendererService:   rendererService,
 	}).SetupWithManagerAndConcurrency(mgr, maxConcurrentReconcilesMCPServer); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPServer")
 		os.Exit(1)

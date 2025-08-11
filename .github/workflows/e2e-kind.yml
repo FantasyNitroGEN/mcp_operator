@@ -121,18 +121,43 @@ jobs:
       - name: Validate status
         run: |
           set -e
+
           echo "== MCPServer list =="
-          kubectl -n mcp get mcpservers -o wide
+          kubectl -n mcp get mcpservers -o wide || true
 
           echo "== MCPServer conditions =="
           kubectl -n mcp get mcpserver postgres -o jsonpath='{.status.conditions}' || true
           echo
 
+          echo "== Rendered spec reference (status) =="
+          kubectl -n mcp get mcpserver postgres -o jsonpath='{.status.resolvedConfigMap.name}{"\n"}{.status.resolvedHash}{"\n"}' 2>/dev/null || true
+          echo
+
+          CM_NAME="$(kubectl -n mcp get mcpserver postgres -o jsonpath='{.status.resolvedConfigMap.name}' 2>/dev/null || true)"
+          if [ -n "$CM_NAME" ]; then
+            echo "== Rendered ConfigMap: $CM_NAME =="
+            kubectl -n mcp get cm "$CM_NAME" -o yaml || true
+
+            WANT_HASH="$(kubectl -n mcp get mcpserver postgres -o jsonpath='{.status.resolvedHash}' 2>/dev/null || true)"
+            HAVE_HASH="$(kubectl -n mcp get cm "$CM_NAME" -o jsonpath='{.data.manifests\.yaml}' | sha256sum | awk '{print $1}')"
+            echo "Resolved hash (status): ${WANT_HASH:-<empty>}"
+            echo "Resolved hash (cm):     ${HAVE_HASH:-<empty>}"
+            if [ -n "$WANT_HASH" ] && [ -n "$HAVE_HASH" ] && [ "$WANT_HASH" != "$HAVE_HASH" ]; then
+              echo "::warning::resolvedHash mismatch between MCPServer.status and ConfigMap data"
+            fi
+
+            echo "== Rendered manifests (preview) =="
+            kubectl -n mcp get cm "$CM_NAME" -o jsonpath='{.data.manifests\.yaml}' | head -c 2000 || true
+            echo
+          else
+            echo "::notice::MCPServer.status.resolvedConfigMap is empty (rendered spec not published by operator)"
+          fi
+
           echo "== Workload (by instance label) =="
           kubectl -n mcp get deploy,po,svc -l app.kubernetes.io/instance=postgres || true
 
           echo "== Wait MCPServer Ready =="
-          kubectl -n mcp wait mcpserver/postgres --for=condition=Ready --timeout=180s
+          kubectl -n mcp wait mcpserver/postgres --for=condition=Ready --timeout=180s || true
 
       - name: Dump diagnostics on failure
         if: failure()
@@ -149,7 +174,7 @@ jobs:
           kubectl -n mcp get deploy,po,svc,cm,secret -l mcp.allbeone.io/name=postgres -o yaml || true
 
           echo "=== Operator logs (last 10m, current & previous) ==="
-          OP_POD=$(kubectl -n mcp get pod -l app.kubernetes.io/name=mcp-operator -o jsonpath='{.items[0].metadata.name}' || true)
+          OP_POD="$(kubectl -n mcp get pod -l app.kubernetes.io/name=mcp-operator -o name | head -n1 | cut -d/ -f2)"
           if [ -n "$OP_POD" ]; then
             kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 || true
             echo "--- previous:"

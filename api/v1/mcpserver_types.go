@@ -956,6 +956,12 @@ type MCPServerStatus struct {
 
 	// LastUpdateTime время последнего обновления
 	LastUpdateTime *metav1.Time `json:"lastUpdateTime,omitempty"`
+
+	// ResolvedConfigMap ссылка на ConfigMap с отрендеренной конфигурацией
+	ResolvedConfigMap *corev1.LocalObjectReference `json:"resolvedConfigMap,omitempty"`
+
+	// ResolvedHash хэш отрендеренной конфигурации
+	ResolvedHash string `json:"resolvedHash,omitempty"`
 }
 
 // MCPServerPhase представляет фазу жизненного цикла
@@ -1008,6 +1014,12 @@ const (
 
 	// MCPServerConditionRegistryFetched спецификация успешно загружена из реестра
 	MCPServerConditionRegistryFetched MCPServerConditionType = "RegistryFetched"
+
+	// MCPServerConditionRendered конфигурация успешно отрендерена
+	MCPServerConditionRendered MCPServerConditionType = "Rendered"
+
+	// MCPServerConditionApplied конфигурация успешно применена
+	MCPServerConditionApplied MCPServerConditionType = "Applied"
 )
 
 //+kubebuilder:object:root=true
@@ -1015,9 +1027,12 @@ const (
 //+kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.replicas
 //+kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 //+kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.status.replicas`
-//+kubebuilder:printcolumn:name="Ready",type=integer,JSONPath=`.status.readyReplicas`
+//+kubebuilder:printcolumn:name="ReadyReplicas",type=integer,JSONPath=`.status.readyReplicas`
 //+kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 //+kubebuilder:printcolumn:name="Endpoint",type=string,JSONPath=`.status.serviceEndpoint`
+//+kubebuilder:printcolumn:name="Rendered",type=string,JSONPath=".status.conditions[?(@.type=='Rendered')].status"
+//+kubebuilder:printcolumn:name="Applied",type=string,JSONPath=".status.conditions[?(@.type=='Applied')].status"
+//+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 
 // MCPServer is the Schema for the mcpservers API
 type MCPServer struct {
