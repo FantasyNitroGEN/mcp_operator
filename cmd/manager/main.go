@@ -44,6 +44,7 @@ func main() {
 	var webhookPort int
 	var enableWebhooks bool
 	var maxConcurrentReconcilesMCPServer int
+	var maxConcurrentReconcilesMCPRegistry int
 
 	// GitHub retry configuration flags
 	var githubMaxRetries int
@@ -65,6 +66,8 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.IntVar(&maxConcurrentReconcilesMCPServer, "max-concurrent-reconciles-mcpserver", 5,
 		"Maximum number of concurrent reconciles for MCPServer controller")
+	flag.IntVar(&maxConcurrentReconcilesMCPRegistry, "max-concurrent-reconciles-mcpregistry", 3,
+		"Maximum number of concurrent reconciles for MCPRegistry controller")
 
 	// GitHub retry configuration flags
 	flag.IntVar(&githubMaxRetries, "github-max-retries", 5, "Maximum number of retries for general GitHub API errors.")
@@ -145,6 +148,21 @@ func main() {
 	deploymentService := services.NewDefaultDeploymentService(mgr.GetClient(), resourceBuilder, kubernetesClient)
 	autoUpdateService := services.NewDefaultAutoUpdateService(mgr.GetClient(), registryService, statusService, eventService)
 	cacheService := services.NewDefaultCacheService()
+
+	setupLog.Info("Setting up MCPRegistry controller", "maxConcurrentReconciles", maxConcurrentReconcilesMCPRegistry)
+	if err = (&controllers.MCPRegistryReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		RegistryService:   registryService,
+		StatusService:     statusService,
+		ValidationService: validationService,
+		RetryService:      retryService,
+		EventService:      eventService,
+		CacheService:      cacheService,
+	}).SetupWithManagerAndConcurrency(mgr, maxConcurrentReconcilesMCPRegistry); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "MCPRegistry")
+		os.Exit(1)
+	}
 
 	setupLog.Info("Setting up MCPServer controller", "maxConcurrentReconciles", maxConcurrentReconcilesMCPServer)
 	if err = (&controllers.MCPServerReconciler{
