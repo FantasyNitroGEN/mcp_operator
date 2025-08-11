@@ -2,6 +2,10 @@
 name: Helm Chart
 
 on:
+  workflow_run:
+    workflows: [ "Release" ]
+    branches: [ main, develop ]
+    types: [ completed ]
   push:
     branches: [main, develop]
     paths:

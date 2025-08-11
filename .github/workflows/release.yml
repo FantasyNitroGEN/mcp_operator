@@ -2,6 +2,10 @@
 name: Release
 
 on:
+  workflow_run:
+    workflows: [ "Docker" ]
+    branches: [ main, develop ]
+    types: [ completed ]
   push:
     tags:
       - 'v*'

@@ -24,34 +24,27 @@ jobs:
           go-version: '1.24.x'
           check-latest: true
 
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3
-
-      - name: Setup Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
-
       - name: Create kind cluster
         uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
         with:
           cluster_name: mcp-e2e
 
+      - name: Export kubeconfig & sanity check
+        id: kube
+        run: |
+          kind get kubeconfig --name mcp-e2e > /tmp/kubeconfig
+          echo "KUBECONFIG=/tmp/kubeconfig" >> $GITHUB_ENV
+          kubectl config current-context
+          kubectl get nodes -o wide
+
       - name: Ensure namespace mcp exists
         run: kubectl create namespace mcp || true
-
-      - name: Build operator image (no push)
-        run: |
-          DOCKER_BUILDKIT=1 docker buildx build \
-            --load --platform linux/amd64 \
-            -t mcp_operator:dev .
-
-      - name: Load image into kind
-        run: kind load docker-image mcp_operator:dev --name mcp-e2e
 
       - name: Install MCP Operator (Helm)
         run: |
           set -e
 
-          # 1) ставим чарт как есть, в ns mcp
+          # 1) ставим чарт в ns mcp
           if [ -d ./helm/mcp-operator ]; then
             helm upgrade --install mcp-operator ./helm/mcp-operator \
               --namespace mcp --create-namespace
@@ -62,27 +55,31 @@ jobs:
               --namespace mcp --create-namespace
           fi
 
-          # 2) убеждаемся, какой образ реально прописан в деплойменте
-          OP_IMG="$(kubectl -n mcp get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].image}')"
-          echo "Operator image detected: $OP_IMG"
+          # 2) принудительно ставим образ ghcr latest (без условий)
+          CTN="$(kubectl -n mcp get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].name}')"
+          kubectl -n mcp set image deploy/mcp-operator "${CTN}=ghcr.io/fantasynitrogen/mcp_operator:latest" --record
 
-          # 3) если по какой-то причине это не latest из GHCR — мягко поправим на latest
-          if ! echo "$OP_IMG" | grep -q "^ghcr.io/fantasynitrogen/mcp_operator:latest$"; then
-            CTN="$(kubectl -n mcp get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].name}')"
-            echo "Fixing image to ghcr.io/fantasynitrogen/mcp_operator:latest (container=$CTN)"
-            kubectl -n mcp set image deploy/mcp-operator "${CTN}=ghcr.io/fantasynitrogen/mcp_operator:latest" --record
-          fi
+          # 3) ждём раскатку
+          kubectl -n mcp rollout status deploy/mcp-operator --timeout=300s
 
-          # 4) ждём поднимание с увеличенным таймаутом; если что — собираем диагностику
-          if ! kubectl -n mcp rollout status deploy/mcp-operator --timeout=120s; then
-            echo "Rollout timed out — diagnostics:"
-            kubectl -n mcp get pods -o wide || true
-            kubectl -n mcp describe deploy mcp-operator || true
-            kubectl -n mcp describe pods -l app.kubernetes.io/name=mcp-operator || true
-            kubectl -n mcp get events --sort-by=.lastTimestamp | tail -n 200 || true
-            kubectl -n mcp logs deploy/mcp-operator --all-containers --tail=200 || true
-            exit 1
-          fi
+      - name: operator health & CRDs
+        run: |
+          set -e
+          kubectl -n mcp get deploy mcp-operator -o wide
+          echo "Known CRDs (if any):"
+          kubectl get crds | grep -E 'mcp(allbeone)?\.io|mcpserver|mcpregistry' || true
+          echo "--- recent events ---"
+          kubectl -n mcp get events --sort-by=.lastTimestamp | tail -n 50 || true
+
+      - name: Health check endpoints
+        run: |
+          set -e
+          # readinessProbe/healthz по умолчанию 8081
+          kubectl -n mcp port-forward deploy/mcp-operator 18081:8081 >/tmp/pf.log 2>&1 &
+          PF_PID=$!
+          sleep 2
+          curl -fsS http://127.0.0.1:18081/healthz || (echo "healthz failed" && exit 1)
+          kill $PF_PID || true
 
       - name: Build CLI
         run: go build -o ./bin/mcp ./cmd/mcp
@@ -113,7 +110,9 @@ jobs:
       # --- Deploy MCP Postgres server from registry ---
       - name: Deploy MCP server (postgres) from registry
         run: |
+          set -e
           ./bin/mcp server deploy postgres \
+            --kubeconfig "$KUBECONFIG" \
             --namespace mcp \
             --replicas 1 \
             --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}' \
@@ -121,13 +120,67 @@ jobs:
 
       - name: Validate status
         run: |
+          set -e
+          echo "== MCPServer list =="
           kubectl -n mcp get mcpservers -o wide
-          kubectl -n mcp get pods -l app.kubernetes.io/instance=postgres
-          kubectl -n mcp wait mcpserver/postgres --for=condition=Ready --timeout=120s || true
+
+          echo "== MCPServer conditions =="
+          kubectl -n mcp get mcpserver postgres -o jsonpath='{.status.conditions}' || true
+          echo
+
+          echo "== Workload (by instance label) =="
+          kubectl -n mcp get deploy,po,svc -l app.kubernetes.io/instance=postgres || true
+
+          echo "== Wait MCPServer Ready =="
+          kubectl -n mcp wait mcpserver/postgres --for=condition=Ready --timeout=180s
 
       - name: Dump diagnostics on failure
         if: failure()
         run: |
-          kubectl -n mcp get all
-          kubectl -n mcp describe mcpserver postgres || true
-          kubectl -n mcp logs deploy/mcp-operator || true
+          set -e
+          echo "=== MCPServer (full) ==="
+          kubectl -n mcp get mcpserver postgres -o yaml || true
+
+          echo "=== All resources in ns mcp ==="
+          kubectl -n mcp get all -o wide || true
+
+          echo "=== Workload by labels ==="
+          kubectl -n mcp get deploy,po,svc,cm,secret -l app.kubernetes.io/instance=postgres -o yaml || true
+          kubectl -n mcp get deploy,po,svc,cm,secret -l mcp.allbeone.io/name=postgres -o yaml || true
+
+          echo "=== Operator logs (last 10m, current & previous) ==="
+          OP_POD=$(kubectl -n mcp get pod -l app.kubernetes.io/name=mcp-operator -o jsonpath='{.items[0].metadata.name}' || true)
+          if [ -n "$OP_POD" ]; then
+            kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 || true
+            echo "--- previous:"
+            kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 --previous || true
+          fi
+
+          echo "=== Recent events ==="
+          kubectl -n mcp get events --sort-by=.lastTimestamp | tail -n 200 || true
+
+          echo "=== Describe deployment/operator ==="
+          kubectl -n mcp describe deploy mcp-operator || true
+
+          echo "=== Describe workload (if present) ==="
+          kubectl -n mcp describe deploy -l app.kubernetes.io/instance=postgres || true
+          kubectl -n mcp describe po -l app.kubernetes.io/instance=postgres || true
+
+          # Сохраним в файлы для артефакта
+          kubectl -n mcp get mcpserver postgres -o yaml > diag_mcpserver.yaml || true
+          kubectl -n mcp get all -o yaml > diag_all.yaml || true
+          [ -n "$OP_POD" ] && kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 > diag_operator_logs.txt || true
+          kubectl -n mcp get events --sort-by=.lastTimestamp > diag_events.txt || true
+
+      - name: Upload diagnostics artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-kind-diagnostics
+          path: |
+            diag_mcpserver.yaml
+            diag_all.yaml
+            diag_operator_logs.txt
+            diag_events.txt
+          retention-days: 7
+
