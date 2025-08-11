@@ -7,21 +7,24 @@ on:
     branches: [ main, develop ]
     types: [ completed ]
   push:
-    branches: [main, develop]
+    branches: [ main, develop ]
     paths:
       - 'helm/**'
       - '.github/workflows/helm.yml'
   pull_request:
-    branches: [main]
+    branches: [ main ]
     paths:
       - 'helm/**'
       - '.github/workflows/helm.yml'
   release:
-    types: [published]
+    types: [ published ]
 
 permissions:
   contents: read
   security-events: write
+  packages: write
+  pages: write
+  id-token: write
 
 env:
   HELM_VERSION: v3.14.0
@@ -45,6 +48,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - uses: ./.github/actions/helm-publish-oci
         with: { helm-version: v3.14.4 }
+        token: ${{ secrets.GITHUB_TOKEN }}
 
   publish-pages:
     needs: helm-validate
