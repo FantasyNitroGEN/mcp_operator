@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -45,6 +46,7 @@ func main() {
 	var enableWebhooks bool
 	var maxConcurrentReconcilesMCPServer int
 	var maxConcurrentReconcilesMCPRegistry int
+	var gogcPercent int
 
 	// GitHub retry configuration flags
 	var githubMaxRetries int
@@ -68,6 +70,8 @@ func main() {
 		"Maximum number of concurrent reconciles for MCPServer controller")
 	flag.IntVar(&maxConcurrentReconcilesMCPRegistry, "max-concurrent-reconciles-mcpregistry", 3,
 		"Maximum number of concurrent reconciles for MCPRegistry controller")
+	flag.IntVar(&gogcPercent, "gogc-percent", 100,
+		"GOGC percentage for Go garbage collector (lower values = more frequent GC)")
 
 	// GitHub retry configuration flags
 	flag.IntVar(&githubMaxRetries, "github-max-retries", 5, "Maximum number of retries for general GitHub API errors.")
@@ -86,6 +90,15 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Configure Go runtime optimizations
+	if gogcPercent != 100 {
+		if err := os.Setenv("GOGC", fmt.Sprintf("%d", gogcPercent)); err != nil {
+			setupLog.Error(err, "Failed to set GOGC environment variable", "percentage", gogcPercent)
+		} else {
+			setupLog.Info("GOGC configured", "percentage", gogcPercent)
+		}
+	}
 
 	mgrOptions := ctrl.Options{
 		Scheme: scheme,

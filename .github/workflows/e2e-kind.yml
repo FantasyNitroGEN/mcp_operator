@@ -74,7 +74,7 @@ jobs:
           fi
 
           # 4) ждём поднимание с увеличенным таймаутом; если что — собираем диагностику
-          if ! kubectl -n mcp rollout status deploy/mcp-operator --timeout=600s; then
+          if ! kubectl -n mcp rollout status deploy/mcp-operator --timeout=120s; then
             echo "Rollout timed out — diagnostics:"
             kubectl -n mcp get pods -o wide || true
             kubectl -n mcp describe deploy mcp-operator || true
