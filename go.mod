@@ -2,7 +2,7 @@ module github.com/FantasyNitroGEN/mcp_operator
 
 go 1.24.0
 
-toolchain go1.24.5
+toolchain go1.24.6
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.37.2
@@ -62,7 +62,7 @@ require (
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	k8s.io/apiextensions-apiserver v0.33.0 // indirect
+	k8s.io/apiextensions-apiserver v0.33.0
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect
