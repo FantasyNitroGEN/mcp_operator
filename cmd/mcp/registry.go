@@ -14,10 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
@@ -315,14 +312,8 @@ func runRegistryRefresh(timeout time.Duration, namespace, name, kubeconfig strin
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Initialize Kubernetes client
-	var cfg *rest.Config
-	var err error
-	if kubeconfig != "" {
-		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		cfg, err = config.GetConfig()
-	}
+	// Initialize Kubernetes client using unified kubeconfig priority logic
+	cfg, err := getKubernetesConfigWithPriority(kubeconfig)
 	if err != nil {
 		return fmt.Errorf("failed to get kubeconfig: %w", err)
 	}

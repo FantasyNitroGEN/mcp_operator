@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
@@ -217,8 +216,8 @@ func runDeploy(serverName, namespace, kubeconfig string, timeout time.Duration, 
 }
 
 func createKubernetesClient(kubeconfig string) (client.Client, error) {
-	// Load kubeconfig
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	// Load kubeconfig using the unified priority logic
+	config, err := getKubernetesConfigWithPriority(kubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load kubeconfig: %w", err)
 	}

@@ -548,22 +548,7 @@ func getKubernetesConfig() (*rest.Config, error) {
 }
 
 func getKubernetesConfigWithPath(kubeconfig string) (*rest.Config, error) {
-	// If kubeconfig path is specified, use it
-	if kubeconfig != "" {
-		return clientcmd.BuildConfigFromFlags("", kubeconfig)
-	}
-
-	// Try in-cluster config first
-	if config, err := rest.InClusterConfig(); err == nil {
-		return config, nil
-	}
-
-	// Fall back to default kubeconfig
-	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	configOverrides := &clientcmd.ConfigOverrides{}
-	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-
-	return kubeConfig.ClientConfig()
+	return getKubernetesConfigWithPriority(kubeconfig)
 }
 
 func getCurrentNamespace() string {
