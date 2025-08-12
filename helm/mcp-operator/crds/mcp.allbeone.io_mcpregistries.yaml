@@ -1,18 +1,10 @@
-{{- if .Values.crds.install }}
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.16.0
-    "helm.sh/hook": pre-install,pre-upgrade
-    "helm.sh/hook-weight": "-5"
-    {{- if .Values.crds.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
   name: mcpregistries.mcp.allbeone.io
-  labels:
-    {{- include "mcp-operator.labels" . | nindent 4 }}
 spec:
   group: mcp.allbeone.io
   names:
@@ -64,7 +56,8 @@ spec:
                 description: Auth contains authentication information for the registry
                 properties:
                   secretRef:
-                    description: SecretRef references a secret containing authentication credentials
+                    description: SecretRef references a secret containing authentication
+                      credentials
                     properties:
                       envVar:
                         description: EnvVar имя переменной окружения
@@ -84,7 +77,8 @@ spec:
                     - name
                     type: object
                   token:
-                    description: Token is a direct token for authentication (not recommended for production)
+                    description: Token is a direct token for authentication (not recommended
+                      for production)
                     type: string
                 type: object
               filters:
@@ -105,7 +99,8 @@ spec:
                 description: RefreshInterval specifies how often to refresh the registry
                 type: string
               servers:
-                description: Servers is a list of specific servers to sync from this registry
+                description: Servers is a list of specific servers to sync from this
+                  registry
                 items:
                   type: string
                 type: array
@@ -116,16 +111,19 @@ spec:
                     description: Github contains GitHub-specific source configuration
                     properties:
                       branch:
-                        description: Branch specifies the branch or ref to use (defaults to main)
+                        description: Branch specifies the branch or ref to use (defaults
+                          to main)
                         type: string
                       repo:
-                        description: Repo specifies the GitHub repository in owner/repo format
+                        description: Repo specifies the GitHub repository in owner/repo
+                          format
                         type: string
                     required:
                     - repo
                     type: object
                   path:
-                    description: Path specifies the root path within the repository containing server folders
+                    description: Path specifies the root path within the repository
+                      containing server folders
                     type: string
                   type:
                     description: Type specifies the source type (github, git, oci)
@@ -149,23 +147,29 @@ spec:
             description: MCPRegistryStatus defines the observed state of MCPRegistry
             properties:
               availableServers:
-                description: AvailableServers is the number of servers available in this registry (deprecated, use ServersDiscovered)
+                description: AvailableServers is the number of servers available in
+                  this registry (deprecated, use ServersDiscovered)
                 format: int32
                 type: integer
               conditions:
-                description: Conditions represent the latest available observations of the registry's state
+                description: Conditions represent the latest available observations
+                  of the registry's state
                 items:
-                  description: MCPRegistryCondition describes the state of a registry at a certain point
+                  description: MCPRegistryCondition describes the state of a registry
+                    at a certain point
                   properties:
                     lastTransitionTime:
-                      description: Last time the condition transitioned from one status to another
+                      description: Last time the condition transitioned from one status
+                        to another
                       format: date-time
                       type: string
                     message:
-                      description: Human-readable message indicating details about last transition
+                      description: Human-readable message indicating details about
+                        last transition
                       type: string
                     reason:
-                      description: Unique, one-word, CamelCase reason for the condition's last transition
+                      description: Unique, one-word, CamelCase reason for the condition's
+                        last transition
                       type: string
                     status:
                       description: Status of the condition, one of True, False, Unknown
@@ -187,35 +191,42 @@ spec:
                   type: string
                 type: array
               lastSyncTime:
-                description: LastSyncTime is the last time the registry was successfully synced
+                description: LastSyncTime is the last time the registry was successfully
+                  synced
                 format: date-time
                 type: string
               message:
-                description: Message provides human-readable information about the registry status
+                description: Message provides human-readable information about the
+                  registry status
                 type: string
               observedRevision:
-                description: ObservedRevision contains the SHA/etag of the last observed revision
+                description: ObservedRevision contains the SHA/etag of the last observed
+                  revision
                 type: string
               phase:
                 description: Phase represents the current phase of the registry
                 type: string
               rateLimitRemaining:
-                description: RateLimitRemaining contains the remaining GitHub API rate limit (if applicable)
+                description: RateLimitRemaining contains the remaining GitHub API
+                  rate limit (if applicable)
                 format: int32
                 type: integer
               reason:
                 description: Reason provides a brief reason for the current status
                 type: string
               serverList:
-                description: ServerList contains information about available servers in the registry
+                description: ServerList contains information about available servers
+                  in the registry
                 items:
-                  description: MCPServerInfo contains information about a server available in the registry
+                  description: MCPServerInfo contains information about a server available
+                    in the registry
                   properties:
                     description:
                       description: Description of the server
                       type: string
                     lastUpdated:
-                      description: LastUpdated is when the server was last updated in the registry
+                      description: LastUpdated is when the server was last updated
+                        in the registry
                       format: date-time
                       type: string
                     name:
@@ -229,7 +240,8 @@ spec:
                   type: object
                 type: array
               serversDiscovered:
-                description: ServersDiscovered is the number of servers discovered in this registry
+                description: ServersDiscovered is the number of servers discovered
+                  in this registry
                 format: int32
                 type: integer
             type: object
@@ -238,4 +250,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}

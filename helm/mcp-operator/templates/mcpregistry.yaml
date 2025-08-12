@@ -1,4 +1,4 @@
-{{- if and .Values.registry .Values.registry.enabled }}
+{{- if and .Values.registry.enabled (.Capabilities.APIVersions.Has "mcp.allbeone.io/v1") }}
 ---
 apiVersion: mcp.allbeone.io/v1
 kind: MCPRegistry
@@ -9,7 +9,6 @@ metadata:
     {{- include "mcp-operator.labels" . | nindent 4 }}
     app.kubernetes.io/component: registry
   annotations:
-    helm.sh/resource-policy: keep
     {{- with .Values.commonAnnotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

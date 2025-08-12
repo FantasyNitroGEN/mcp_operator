@@ -30,6 +30,9 @@ spec:
     - jsonPath: .status.serviceEndpoint
       name: Endpoint
       type: string
+    - jsonPath: .status.conditions[?(@.type=='RegistryFetched')].status
+      name: RegistryFetched
+      type: string
     - jsonPath: .status.conditions[?(@.type=='Rendered')].status
       name: Rendered
       type: string
