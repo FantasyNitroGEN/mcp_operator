@@ -87,8 +87,9 @@ rules:
   - get
   - list
   - watch
-{{- if .Values.backup.enabled }}
-# Secrets access only when backup functionality is enabled
+  - create
+  - update
+  - patch
 - apiGroups:
   - ""
   resources:
@@ -97,6 +98,11 @@ rules:
   - get
   - list
   - watch
+  - create
+  - update
+  - patch
+{{- if .Values.backup.enabled }}
+# Additional secrets access when backup functionality is enabled (kept for backward compatibility)
 {{- end }}
 - apiGroups:
   - ""

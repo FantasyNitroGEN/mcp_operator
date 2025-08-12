@@ -107,6 +107,12 @@ jobs:
           URL="postgresql://postgres:postgres@pg-postgresql.mcp.svc.cluster.local:5432/app?sslmode=disable"
           echo "URL=${URL}" >> $GITHUB_OUTPUT
 
+      - name: Wait for CRDs
+        run: |
+          kubectl wait --for=condition=Established --timeout=120s crd/mcpservers.mcp.allbeone.io
+          # MCPRegistry теперь ставим тоже:
+          kubectl wait --for=condition=Established --timeout=120s crd/mcpregistries.mcp.allbeone.io
+
       # --- Deploy MCP Postgres server from registry ---
       - name: Deploy MCP server (postgres) from registry
         run: |
