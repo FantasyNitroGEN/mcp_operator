@@ -40,6 +40,34 @@ jobs:
       - name: Ensure namespace mcp exists
         run: kubectl create namespace mcp || true
 
+      - name: Assert chart CRDs layout (crds/ only)
+        run: |
+          set -e
+          test -d helm/mcp-operator/crds || { echo "::error::helm/mcp-operator/crds not found"; exit 1; }
+
+          # 1) В crds/ должно быть ровно 3 CRD
+          CRD_CNT=$(grep -R "^[[:space:]]*kind:[[:space:]]*CustomResourceDefinition" -n helm/mcp-operator/crds | wc -l || true)
+          if [ "$CRD_CNT" -ne 3 ]; then
+            echo "::error::Expected 3 CRDs in helm/mcp-operator/crds, got $CRD_CNT"
+            grep -R "^[[:space:]]*kind:[[:space:]]*CustomResourceDefinition" -n helm/mcp-operator/crds || true
+            exit 1
+          fi
+
+          # 2) В templates/ не должно быть CRD
+          if grep -R "^[[:space:]]*kind:[[:space:]]*CustomResourceDefinition" -n helm/mcp-operator/templates >/dev/null 2>&1; then
+            echo "::error::CRD manifests must NOT be in helm/mcp-operator/templates (move them to crds/)"
+            grep -R "^[[:space:]]*kind:[[:space:]]*CustomResourceDefinition" -n helm/mcp-operator/templates || true
+            exit 1
+          fi
+
+          # 3) helm template должен выводить 3 CRD (crds/ попадают в вывод)
+          REN_CNT=$(helm template ./helm/mcp-operator | grep -c "^[[:space:]]*kind:[[:space:]]*CustomResourceDefinition" || true)
+          if [ "$REN_CNT" -ne 3 ]; then
+            echo "::error::helm template should render 3 CRDs, got $REN_CNT"
+            helm template ./helm/mcp-operator | awk '/^kind:[[:space:]]*CustomResourceDefinition/{p=1} p&&/name:/{print $2; p=0}'
+            exit 1
+          fi
+
       - name: Install MCP Operator (Helm)
         run: |
           set -e
@@ -66,8 +94,8 @@ jobs:
         run: |
           set -e
           kubectl -n mcp get deploy mcp-operator -o wide
-          echo "Known CRDs (if any):"
-          kubectl get crds | grep -E 'mcp(allbeone)?\.io|mcpserver|mcpregistry' || true
+          echo "Known CRDs under mcp.allbeone.io:"
+          kubectl get crd | grep 'mcp\.allbeone\.io' || true
           echo "--- recent events ---"
           kubectl -n mcp get events --sort-by=.lastTimestamp | tail -n 50 || true
 
@@ -107,11 +135,15 @@ jobs:
           URL="postgresql://postgres:postgres@pg-postgresql.mcp.svc.cluster.local:5432/app?sslmode=disable"
           echo "URL=${URL}" >> $GITHUB_OUTPUT
 
-      - name: Wait for CRDs
+      - name: Wait for CRDs (all)
         run: |
+          set -e
           kubectl wait --for=condition=Established --timeout=120s crd/mcpservers.mcp.allbeone.io
-          # MCPRegistry теперь ставим тоже:
+          kubectl wait --for=condition=Established --timeout=120s crd/mcpserverbackups.mcp.allbeone.io
           kubectl wait --for=condition=Established --timeout=120s crd/mcpregistries.mcp.allbeone.io
+
+          # доп.проверка, что API зарегистрирован
+          kubectl api-resources --api-group=mcp.allbeone.io | grep -E 'MCPServer|MCPServerBackup|MCPRegistry'
 
       # --- Deploy MCP Postgres server from registry ---
       - name: Deploy MCP server (postgres) from registry
