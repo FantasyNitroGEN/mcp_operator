@@ -1,36 +1,47 @@
 {{- if and .Values.registry.enabled (.Capabilities.APIVersions.Has "mcp.allbeone.io/v1") }}
----
 apiVersion: mcp.allbeone.io/v1
 kind: MCPRegistry
 metadata:
-  name: {{ .Values.registry.name }}
+  name: {{ required "registry.name is required" .Values.registry.name | quote }}
   namespace: {{ include "mcp-operator.namespace" . }}
   labels:
     {{- include "mcp-operator.labels" . | nindent 4 }}
     app.kubernetes.io/component: registry
+  {{- with .Values.commonAnnotations }}
   annotations:
-    {{- with .Values.commonAnnotations }}
     {{- toYaml . | nindent 4 }}
-    {{- end }}
+  {{- end }}
 spec:
-  {{- if and (hasKey .Values.registry "url") (ne (trim .Values.registry.url) "") }}
-  url: {{ .Values.registry.url | quote }}
+  {{- with .Values.registry.url }}
+  url: {{ . | quote }}
   {{- end }}
-  {{- if and .Values.registry.source .Values.registry.source.type }}
-  type: {{ .Values.registry.source.type }}
+  {{- with .Values.registry.source }}
+  {{- with .type }}
+  type: {{ . | quote }}
+  {{- end }}
   source:
-    type: {{ .Values.registry.source.type }}
-    {{- if and (eq .Values.registry.source.type "github") .Values.registry.source.repo }}
-    github:
-      repo: {{ .Values.registry.source.repo }}
-      {{- if .Values.registry.source.branch }}branch: {{ .Values.registry.source.branch }}{{- end }}
+    {{- with .type }}
+    type: {{ . | quote }}
     {{- end }}
-    {{- if .Values.registry.source.path }}path: {{ .Values.registry.source.path }}{{- end }}
+    {{- if and (eq .type "github") .repo }}
+    github:
+      repo: {{ .repo | quote }}
+      {{- with .branch }}
+      branch: {{ . | quote }}
+      {{- end }}
+    {{- end }}
+    {{- with .path }}
+    path: {{ . | quote }}
+    {{- end }}
   {{- end }}
-  {{- if .Values.registry.refreshInterval }}refreshInterval: {{ .Values.registry.refreshInterval }}{{- end }}
-  {{- if .Values.registry.auth.secretName }}
+  {{- with .Values.registry.refreshInterval }}
+  refreshInterval: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.registry.auth }}
+  {{- with .secretName }}
   auth:
     secretRef:
-      name: {{ .Values.registry.auth.secretName }}
+      name: {{ . | quote }}
+  {{- end }}
   {{- end }}
 {{- end }}
