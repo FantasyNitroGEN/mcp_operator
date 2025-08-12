@@ -90,6 +90,33 @@ rules:
   - create
   - update
   - patch
+  # MCPRegistry resources
+- apiGroups:
+    - mcp.allbeone.io
+  resources:
+    - mcpregistries
+  verbs:
+    - get
+    - list
+    - watch
+    - create
+    - update
+    - patch
+    - delete
+- apiGroups:
+    - mcp.allbeone.io
+  resources:
+    - mcpregistries/status
+  verbs:
+    - get
+    - update
+    - patch
+- apiGroups:
+    - mcp.allbeone.io
+  resources:
+    - mcpregistries/finalizers
+  verbs:
+    - update
 - apiGroups:
   - ""
   resources:
