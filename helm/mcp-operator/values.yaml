@@ -9,6 +9,36 @@ controller:
     # Enable MCPRegistry controller (conditional registration based on CRD existence)
     enabled: true
 
+# Registry configuration
+registry:
+  # Enable registry creation
+  enabled: true
+  
+  # Registry name
+  name: "default-registry"
+  
+  # Registry source configuration
+  source:
+    # Source type (github, http, etc.)
+    type: "github"
+    
+    # GitHub repository (only used when type is "github")
+    repo: ""
+    
+    # GitHub branch (optional, defaults to default branch)
+    branch: ""
+    
+    # Path within the repository (optional)
+    path: ""
+  
+  # Refresh interval for registry updates
+  refreshInterval: ""
+  
+  # Authentication configuration
+  auth:
+    # Secret name containing authentication credentials
+    secretName: ""
+
 # Operator configuration
 operator:
   # Image configuration

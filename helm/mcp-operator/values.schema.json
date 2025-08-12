@@ -24,6 +24,62 @@
       "required": ["mcpRegistry"],
       "additionalProperties": false
     },
+    "registry": {
+      "type": "object",
+      "description": "Registry configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable registry creation"
+        },
+        "name": {
+          "type": "string",
+          "description": "Registry name"
+        },
+        "source": {
+          "type": "object",
+          "description": "Registry source configuration",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Source type (github, http, etc.)",
+              "enum": ["github", "http"]
+            },
+            "repo": {
+              "type": "string",
+              "description": "GitHub repository (only used when type is github)"
+            },
+            "branch": {
+              "type": "string",
+              "description": "GitHub branch (optional, defaults to default branch)"
+            },
+            "path": {
+              "type": "string",
+              "description": "Path within the repository (optional)"
+            }
+          },
+          "required": ["type"],
+          "additionalProperties": false
+        },
+        "refreshInterval": {
+          "type": "string",
+          "description": "Refresh interval for registry updates"
+        },
+        "auth": {
+          "type": "object",
+          "description": "Authentication configuration",
+          "properties": {
+            "secretName": {
+              "type": "string",
+              "description": "Secret name containing authentication credentials"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["enabled", "name", "source"],
+      "additionalProperties": false
+    },
     "operator": {
       "type": "object",
       "description": "Operator configuration",
