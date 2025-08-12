@@ -16,7 +16,6 @@ spec:
   {{- if and (hasKey .Values.registry "url") (ne (trim .Values.registry.url) "") }}
   url: {{ .Values.registry.url | quote }}
   {{- end }}
-
   {{- if and .Values.registry.source .Values.registry.source.type }}
   type: {{ .Values.registry.source.type }}
   source:
@@ -28,7 +27,6 @@ spec:
     {{- end }}
     {{- if .Values.registry.source.path }}path: {{ .Values.registry.source.path }}{{- end }}
   {{- end }}
-
   {{- if .Values.registry.refreshInterval }}refreshInterval: {{ .Values.registry.refreshInterval }}{{- end }}
   {{- if .Values.registry.auth.secretName }}
   auth:
