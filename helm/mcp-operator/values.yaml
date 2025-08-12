@@ -23,16 +23,16 @@ registry:
     type: "github"
     
     # GitHub repository (only used when type is "github")
-    repo: ""
+    repo: "docker/mcp-registry"
     
     # GitHub branch (optional, defaults to default branch)
-    branch: ""
+    branch: "main"
     
     # Path within the repository (optional)
-    path: ""
+    path: "servers"
   
   # Refresh interval for registry updates
-  refreshInterval: ""
+  refreshInterval: "5m"
   
   # Authentication configuration
   auth:

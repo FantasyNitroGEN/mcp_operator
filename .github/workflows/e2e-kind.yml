@@ -43,9 +43,11 @@ jobs:
       - name: Assert chart CRDs layout (crds/ only)
         run: |
           set -e
+
+          # 0) Папка crds/ должна существовать
           test -d helm/mcp-operator/crds || { echo "::error::helm/mcp-operator/crds not found"; exit 1; }
 
-          # 1) В crds/ должно быть ровно 3 CRD
+          # 1) В crds/ должно быть ровно 3 CRD (подсчёт по файлам)
           CRD_CNT=$(grep -R "^[[:space:]]*kind:[[:space:]]*CustomResourceDefinition" -n helm/mcp-operator/crds | wc -l || true)
           if [ "$CRD_CNT" -ne 3 ]; then
             echo "::error::Expected 3 CRDs in helm/mcp-operator/crds, got $CRD_CNT"
@@ -60,13 +62,28 @@ jobs:
             exit 1
           fi
 
-          # 3) helm template должен выводить 3 CRD (crds/ попадают в вывод)
-          REN_CNT=$(helm template ./helm/mcp-operator | grep -c "^[[:space:]]*kind:[[:space:]]*CustomResourceDefinition" || true)
+          # 3) helm template должен показывать CRD ТОЛЬКО с флагом --include-crds
+          REN_CNT=$(helm template ./helm/mcp-operator --include-crds | grep -c "^[[:space:]]*kind:[[:space:]]*CustomResourceDefinition" || true)
           if [ "$REN_CNT" -ne 3 ]; then
-            echo "::error::helm template should render 3 CRDs, got $REN_CNT"
-            helm template ./helm/mcp-operator | awk '/^kind:[[:space:]]*CustomResourceDefinition/{p=1} p&&/name:/{print $2; p=0}'
+            echo "::error::helm template --include-crds should render 3 CRDs, got $REN_CNT"
+            helm template ./helm/mcp-operator --include-crds | awk '/^kind:[[:space:]]*CustomResourceDefinition/{p=1} p&&/name:/{print $2; p=0}'
             exit 1
           fi
+
+          # (доп) альтернативная проверка через helm show crds
+          SHOW_CNT=$(helm show crds ./helm/mcp-operator | grep -c "^[[:space:]]*kind:[[:space:]]*CustomResourceDefinition" || true)
+          if [ "$SHOW_CNT" -ne 3 ]; then
+            echo "::error::helm show crds should list 3 CRDs, got $SHOW_CNT"
+            helm show crds ./helm/mcp-operator || true
+            exit 1
+          fi
+
+      - name: Ensure controller-gen installed
+        run: go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.4
+
+      - name: Verify CRDs are in sync with chart
+        run: make check-crds
+
 
       - name: Install MCP Operator (Helm)
         run: |

@@ -2,6 +2,9 @@
 IMG ?= mcp-operator:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
+# --- CRD paths for Helm chart sync ---
+CRD_SRC_DIR := config/crd/bases
+CHART_CRD_DIR := helm/mcp-operator/crds
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -253,6 +256,28 @@ $(ENVTEST): $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,${GOLANGCI_LINT_VERSION})
+
+.PHONY: sync-crds
+sync-crds: manifests ## Generate CRDs and sync them into Helm chart (crds/)
+	@echo ">> syncing CRDs to $(CHART_CRD_DIR)"
+	@mkdir -p $(CHART_CRD_DIR)
+	@if command -v rsync >/dev/null 2>&1; then \
+		rsync -a --delete $(CRD_SRC_DIR)/ $(CHART_CRD_DIR)/ ; \
+	else \
+		rm -rf $(CHART_CRD_DIR)/* ; \
+		cp -a $(CRD_SRC_DIR)/* $(CHART_CRD_DIR)/ ; \
+	fi
+
+.PHONY: check-crds
+check-crds: manifests ## Verify chart CRDs match generated ones
+	@echo ">> verifying CRDs are in sync"
+	@diff -qr $(CRD_SRC_DIR) $(CHART_CRD_DIR)
+
+.PHONY: chart-build
+chart-build: sync-crds ## Sync CRDs, then lint & render chart
+	helm lint helm/mcp-operator
+	helm template helm/mcp-operator --include-crds >/dev/null
+
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary (ideally with version)
