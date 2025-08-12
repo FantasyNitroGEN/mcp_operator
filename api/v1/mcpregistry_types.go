@@ -37,7 +37,7 @@ type RegistryFilters struct {
 // MCPRegistrySpec defines the desired state of MCPRegistry
 type MCPRegistrySpec struct {
 	// URL is the base URL of the MCP registry
-	URL string `json:"url"`
+	URL string `json:"url,omitempty"`
 
 	// Type specifies the registry type (github, local, etc.)
 	Type string `json:"type,omitempty"`
@@ -185,6 +185,8 @@ type MCPServerInfo struct {
 // +kubebuilder:printcolumn:name="Servers",type=integer,JSONPath=".status.serversDiscovered"
 // +kubebuilder:printcolumn:name="LastSync",type=date,JSONPath=".status.lastSyncTime"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="has(self.spec.url) || (has(self.spec.source) && has(self.spec.source.github) && self.spec.source.github.repo != '')",message="Either spec.url or spec.source.github.repo must be set"
+// +kubebuilder:validation:XValidation:rule="!(has(self.spec.url) && has(self.spec.source) && has(self.spec.source.github) && self.spec.source.github.repo != '')",message="Specify only one of spec.url or spec.source.github.repo"
 
 // MCPRegistry is the Schema for the mcpregistries API
 type MCPRegistry struct {

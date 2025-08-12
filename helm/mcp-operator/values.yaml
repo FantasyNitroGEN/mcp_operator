@@ -31,6 +31,9 @@ registry:
     # Path within the repository (optional)
     path: "servers"
   
+  # Registry URL (leave empty to use source.github.* configuration)
+  url: ""
+  
   # Refresh interval for registry updates
   refreshInterval: "5m"
   

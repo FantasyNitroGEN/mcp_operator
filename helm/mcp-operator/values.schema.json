@@ -61,6 +61,10 @@
           "required": ["type"],
           "additionalProperties": false
         },
+        "url": {
+          "type": "string",
+          "description": "Registry URL (leave empty to use source.github.* configuration)"
+        },
         "refreshInterval": {
           "type": "string",
           "description": "Refresh interval for registry updates"
