@@ -254,8 +254,14 @@ jobs:
             --kubeconfig "$KUBECONFIG" \
             --namespace mcp \
             --replicas 1 \
-            --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}' \
-            --wait --timeout 300s
+            --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}'
+
+      - name: Patch MCPServer registry name (fix Rendered/Applied=Unknown)
+        run: |
+          set -e
+          kubectl -n mcp patch mcpserver postgres --type merge -p '{"spec":{"registry":{"name":"default-registry"}}}'
+          # опционально: показать, что применилось
+          kubectl -n mcp get mcpserver postgres -o jsonpath='{.spec.registry.name}{"\n"}'
 
       - name: Validate status
         run: |
