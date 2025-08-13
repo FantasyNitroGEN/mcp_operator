@@ -12,41 +12,38 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- $repo := .Values.registry.source.repo | default "" -}}
-  {{- $path := .Values.registry.source.path | default "servers" -}}
-  {{- $branch := .Values.registry.source.branch | default "" -}}
-  {{- if .Values.registry.url }}
+  {{- /* true, если задан непустой registry.url */ -}}
+  {{- $hasURL := and (hasKey .Values.registry "url") (ne (trim .Values.registry.url) "") }}
+
+  {{- if $hasURL }}
+  # ВАРИАНТ A: используем explicit URL
   url: {{ .Values.registry.url | quote }}
-  {{- else if and (eq .Values.registry.source.type "github") $repo }}
-  {{- $branchParam := "" -}}
-  {{- if $branch }}{{- $branchParam = printf "?ref=%s" $branch }}{{- end }}
-  url: {{ printf "https://api.github.com/repos/%s/contents/%s%s" $repo $path $branchParam | quote }}
-  {{- end }}
-  {{- with .Values.registry.source }}
-  {{- with .type }}
-  type: {{ . | quote }}
-  {{- end }}
+
+  {{- else if and .Values.registry.source (eq .Values.registry.source.type "github") (hasKey .Values.registry.source "repo") (ne (trim .Values.registry.source.repo) "") }}
+  # ВАРИАНТ B: используем источник GitHub; URL НЕ РЕНДЕРИМ
+  type: {{ .Values.registry.source.type | quote }}
   source:
-    {{- with .type }}
-    type: {{ . | quote }}
-    {{- end }}
-    {{- if and (eq .type "github") .repo }}
+    type: {{ .Values.registry.source.type | quote }}
     github:
-      repo: {{ .repo | quote }}
-      {{- with .branch }}
+      repo: {{ .Values.registry.source.repo | quote }}
+      {{- with .Values.registry.source.branch }}
       branch: {{ . | quote }}
       {{- end }}
-    {{- end }}
-    {{- with .path }}
+    {{- with .Values.registry.source.path }}
     path: {{ . | quote }}
     {{- end }}
+
+  {{- else }}
+  # Ни url, ни source не заданы корректно — валидатор CRD уронит install
   {{- end }}
+
   {{- with .Values.registry.refreshInterval }}
   refreshInterval: {{ . | quote }}
   {{- end }}
+
   {{- with .Values.registry.auth }}
+  {{- if .secretName }}
   auth:
-    {{- if .secretName }}
     secretRef:
       name: {{ .secretName | quote }}
       {{- with .secretKey }}
@@ -58,8 +55,9 @@ spec:
       {{- with .optional }}
       optional: {{ . }}
       {{- end }}
-    {{- else if .token }}
+  {{- else if .token }}
+  auth:
     token: {{ .token | quote }}
-    {{- end }}
+  {{- end }}
   {{- end }}
 {{- end }}
