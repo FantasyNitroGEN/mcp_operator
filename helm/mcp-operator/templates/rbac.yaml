@@ -86,9 +86,11 @@ rules:
   verbs:
   - get
   - list
+  - watch
   - create
   - update
   - patch
+  - delete
   # MCPRegistry resources
 - apiGroups:
     - mcp.allbeone.io
@@ -122,6 +124,7 @@ rules:
   verbs:
   - get
   - list
+  - watch
 {{- if .Values.backup.enabled }}
 # Additional secrets access when backup functionality is enabled (kept for backward compatibility)
 {{- end }}

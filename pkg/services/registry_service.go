@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"os"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
@@ -11,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -19,6 +21,97 @@ import (
 type DefaultRegistryService struct {
 	registryClient *registry.Client
 	client         client.Client
+}
+
+// getGitHubTokenFromSecret reads GitHub token from Kubernetes secret
+// Supports both "token" and "GITHUB_TOKEN" keys for compatibility
+func (r *DefaultRegistryService) getGitHubTokenFromSecret(ctx context.Context, secretRef *mcpv1.SecretReference, namespace string) (string, error) {
+	logger := log.FromContext(ctx).WithValues("secret", secretRef.Name, "namespace", namespace)
+
+	if secretRef == nil {
+		return "", nil
+	}
+
+	secret := &corev1.Secret{}
+	err := r.client.Get(ctx, types.NamespacedName{
+		Name:      secretRef.Name,
+		Namespace: namespace,
+	}, secret)
+
+	if err != nil {
+		if errors.IsNotFound(err) && secretRef.Optional {
+			logger.Info("Optional secret not found, continuing without token")
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get secret %s/%s: %w", namespace, secretRef.Name, err)
+	}
+
+	// Try to get token using the specified key first
+	if secretRef.Key != "" {
+		if tokenBytes, exists := secret.Data[secretRef.Key]; exists {
+			logger.Info("Found GitHub token using specified key", "key", secretRef.Key)
+			return string(tokenBytes), nil
+		}
+	}
+
+	// Try both "token" and "GITHUB_TOKEN" keys for compatibility
+	supportedKeys := []string{"token", "GITHUB_TOKEN"}
+	for _, key := range supportedKeys {
+		if tokenBytes, exists := secret.Data[key]; exists {
+			logger.Info("Found GitHub token using key", "key", key)
+			return string(tokenBytes), nil
+		}
+	}
+
+	if !secretRef.Optional {
+		return "", fmt.Errorf("GitHub token not found in secret %s/%s, tried keys: %v", namespace, secretRef.Name, append([]string{secretRef.Key}, supportedKeys...))
+	}
+
+	logger.Info("GitHub token not found in optional secret, continuing without token")
+	return "", nil
+}
+
+// getGitHubToken gets GitHub token with fallback logic:
+// 1. Try to get from MCPRegistry auth.secretRef
+// 2. Fall back to environment variable GITHUB_TOKEN
+// 3. Return empty string if nothing found
+func (r *DefaultRegistryService) getGitHubToken(ctx context.Context, mcpRegistry *mcpv1.MCPRegistry) string {
+	logger := log.FromContext(ctx).WithValues("registry", mcpRegistry.Name)
+
+	// First, try direct token from spec (not recommended for production)
+	if mcpRegistry.Spec.Auth != nil && mcpRegistry.Spec.Auth.Token != "" {
+		logger.Info("Using direct token from MCPRegistry spec (not recommended for production)")
+		return mcpRegistry.Spec.Auth.Token
+	}
+
+	// Try to get token from secret reference
+	if mcpRegistry.Spec.Auth != nil && mcpRegistry.Spec.Auth.SecretRef != nil {
+		token, err := r.getGitHubTokenFromSecret(ctx, mcpRegistry.Spec.Auth.SecretRef, mcpRegistry.Namespace)
+		if err != nil {
+			logger.Error(err, "Failed to get GitHub token from secret, falling back to environment variable")
+		} else if token != "" {
+			logger.Info("Successfully retrieved GitHub token from secret")
+			return token
+		}
+	}
+
+	// Fall back to environment variable
+	if envToken := os.Getenv("GITHUB_TOKEN"); envToken != "" {
+		logger.Info("Using GitHub token from GITHUB_TOKEN environment variable")
+		return envToken
+	}
+
+	logger.Info("No GitHub token found, proceeding without authentication")
+	return ""
+}
+
+// getRegistryClientForRegistry creates a registry client with authentication from MCPRegistry
+func (r *DefaultRegistryService) getRegistryClientForRegistry(ctx context.Context, mcpRegistry *mcpv1.MCPRegistry) *registry.Client {
+	token := r.getGitHubToken(ctx, mcpRegistry)
+	if token != "" {
+		return registry.NewClientWithToken(token)
+	}
+	return registry.NewClient()
 }
 
 // NewDefaultRegistryService creates a new DefaultRegistryService
@@ -198,12 +291,11 @@ func (r *DefaultRegistryService) SyncRegistry(ctx context.Context, registry *mcp
 	logger := log.FromContext(ctx).WithValues("registry", registry.Name)
 	logger.Info("Synchronizing registry data")
 
-	if r.registryClient == nil {
-		return fmt.Errorf("registry client is not initialized")
-	}
+	// Get authenticated registry client for this specific registry
+	registryClient := r.getRegistryClientForRegistry(ctx, registry)
 
-	// List available servers in the registry
-	servers, err := r.ListAvailableServers(ctx, registry.Name)
+	// List available servers in the registry using the authenticated client
+	servers, err := r.listAvailableServersWithClient(ctx, registry.Name, registryClient)
 	if err != nil {
 		return fmt.Errorf("failed to list available servers: %w", err)
 	}
@@ -231,16 +323,16 @@ func (r *DefaultRegistryService) SyncRegistry(ctx context.Context, registry *mcp
 	return nil
 }
 
-// ListAvailableServers lists all available servers in a registry
-func (r *DefaultRegistryService) ListAvailableServers(ctx context.Context, registryName string) ([]registry.MCPServerInfo, error) {
+// listAvailableServersWithClient lists all available servers in a registry using the provided client
+func (r *DefaultRegistryService) listAvailableServersWithClient(ctx context.Context, registryName string, registryClient *registry.Client) ([]registry.MCPServerInfo, error) {
 	logger := log.FromContext(ctx).WithValues("registry", registryName)
 	logger.Info("Listing available servers in registry")
 
-	if r.registryClient == nil {
+	if registryClient == nil {
 		return nil, fmt.Errorf("registry client is not initialized")
 	}
 
-	servers, err := r.registryClient.ListServers(ctx)
+	servers, err := registryClient.ListServers(ctx)
 	if err != nil {
 		logger.Error(err, "Failed to list servers from registry")
 		return nil, fmt.Errorf("failed to list servers: %w", err)
@@ -250,17 +342,21 @@ func (r *DefaultRegistryService) ListAvailableServers(ctx context.Context, regis
 	return servers, nil
 }
 
+// ListAvailableServers lists all available servers in a registry using the default client (for backward compatibility)
+func (r *DefaultRegistryService) ListAvailableServers(ctx context.Context, registryName string) ([]registry.MCPServerInfo, error) {
+	return r.listAvailableServersWithClient(ctx, registryName, r.registryClient)
+}
+
 // ValidateRegistryConnection validates connection to registry
 func (r *DefaultRegistryService) ValidateRegistryConnection(ctx context.Context, registry *mcpv1.MCPRegistry) error {
 	logger := log.FromContext(ctx).WithValues("registry", registry.Name)
 	logger.Info("Validating registry connection")
 
-	if r.registryClient == nil {
-		return fmt.Errorf("registry client is not initialized")
-	}
+	// Get authenticated registry client for this specific registry
+	registryClient := r.getRegistryClientForRegistry(ctx, registry)
 
 	// Test connection by attempting to list servers
-	_, err := r.registryClient.ListServers(ctx)
+	_, err := registryClient.ListServers(ctx)
 	if err != nil {
 		logger.Error(err, "Registry connection validation failed")
 		return fmt.Errorf("registry connection validation failed: %w", err)
@@ -281,7 +377,7 @@ func (r *DefaultRegistryService) GetRegistryClient() *registry.Client {
 }
 
 // EnrichMCPServerFromCache enriches MCPServer with registry data from ConfigMap cache
-func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, mcpServer *mcpv1.MCPServer) error {
+func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, mcpServer *mcpv1.MCPServer, namespace string) error {
 	logger := log.FromContext(ctx).WithValues(
 		"mcpserver", mcpServer.Name,
 		"registryName", mcpServer.Spec.Registry.RegistryName,
@@ -306,13 +402,20 @@ func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, m
 	// Find ConfigMap mcpregistry-<registryName>-<serverName>
 	configMapName := fmt.Sprintf("mcpregistry-%s-%s", mcpServer.Spec.Registry.RegistryName, mcpServer.Spec.Registry.ServerName)
 	configMap := &corev1.ConfigMap{}
+
+	// Use the provided namespace parameter instead of mcpServer.Namespace
+	ns := namespace
+	if ns == "" {
+		ns = mcpServer.Namespace
+	}
+
 	if err := r.client.Get(ctx, client.ObjectKey{
 		Name:      configMapName,
-		Namespace: mcpServer.Namespace,
+		Namespace: ns,
 	}, configMap); err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("ConfigMap not found for server", "configMap", configMapName)
-			return fmt.Errorf("registry cache not found: ConfigMap %s not found in namespace %s", configMapName, mcpServer.Namespace)
+			logger.Info("ConfigMap not found for server", "configMap", configMapName, "namespace", ns)
+			return fmt.Errorf("registry cache not found: ConfigMap %s not found in namespace %s", configMapName, ns)
 		}
 		return fmt.Errorf("failed to get ConfigMap %s: %w", configMapName, err)
 	}

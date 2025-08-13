@@ -56,45 +56,20 @@ func (c *CacheManager) CacheServer(ctx context.Context, registryName string, ser
 		},
 	}
 
-	// Set owner reference
+	// Set controller reference (owner reference)
 	if err := controllerutil.SetControllerReference(mcpRegistry, configMap, c.Scheme()); err != nil {
-		return fmt.Errorf("failed to set owner reference: %w", err)
+		return fmt.Errorf("failed to set controller reference: %w", err)
 	}
 
-	// Check if ConfigMap already exists
-	existing := &corev1.ConfigMap{}
-	err = c.Get(ctx, types.NamespacedName{
-		Name:      configMapName,
-		Namespace: mcpRegistry.Namespace,
-	}, existing)
+	logger.Info("Applying server ConfigMap using server-side apply",
+		"configMap", configMapName,
+		"registry", registryName,
+		"server", serverInfo.Name,
+		"namespace", mcpRegistry.Namespace)
 
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Create new ConfigMap
-			logger.Info("Creating server ConfigMap",
-				"configMap", configMapName,
-				"registry", registryName,
-				"server", serverInfo.Name)
-
-			if err := c.Create(ctx, configMap); err != nil {
-				return fmt.Errorf("failed to create ConfigMap: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to get ConfigMap: %w", err)
-		}
-	} else {
-		// Update existing ConfigMap
-		logger.Info("Updating server ConfigMap",
-			"configMap", configMapName,
-			"registry", registryName,
-			"server", serverInfo.Name)
-
-		existing.Data = configMap.Data
-		existing.Labels = configMap.Labels
-
-		if err := c.Update(ctx, existing); err != nil {
-			return fmt.Errorf("failed to update ConfigMap: %w", err)
-		}
+	// Use server-side apply with Patch
+	if err := c.Patch(ctx, configMap, client.Apply, client.FieldOwner("mcp-operator"), client.ForceOwnership); err != nil {
+		return fmt.Errorf("failed to apply ConfigMap: %w", err)
 	}
 
 	return nil

@@ -40,6 +40,11 @@ jobs:
       - name: Ensure namespace mcp exists
         run: kubectl create namespace mcp || true
 
+      - name: Create GitHub token secret (optional, for load testing)
+        run: |
+          [ -n "${{ secrets.GH_PAT }}" ] && \
+          kubectl -n mcp create secret generic gh-token --from-literal=token='${{ secrets.GH_PAT }}' || true
+
       - name: Assert chart CRDs layout (crds/ only)
         run: |
           set -e
@@ -167,7 +172,7 @@ jobs:
         run: |
           set -e
           ./bin/mcp server deploy postgres \
-            --registry postgres \
+            --registry default-registry \
             --kubeconfig "$KUBECONFIG" \
             --namespace mcp \
             --replicas 1 \

@@ -158,7 +158,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		)
 
 		registryStartTime := time.Now()
-		if err := r.RegistryService.EnrichMCPServerFromCache(ctx, mcpServer); err != nil {
+		if err := r.RegistryService.EnrichMCPServerFromCache(ctx, mcpServer, req.Namespace); err != nil {
 			logger.Error(err, "Failed to enrich MCPServer from registry cache",
 				"registry_name", mcpServer.Spec.Registry.RegistryName,
 				"server_name", mcpServer.Spec.Registry.ServerName,

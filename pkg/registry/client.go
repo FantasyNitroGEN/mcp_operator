@@ -377,7 +377,11 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 		*rateLimitInfo = c.extractRateLimitInfo(resp)
 
 		if resp.StatusCode == http.StatusNotFound {
-			return resp, fmt.Errorf("server %s not found in registry", serverName)
+			// 404 is not an error - server simply doesn't have server.yaml
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+			}
+			return resp, nil
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -593,6 +597,10 @@ func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*S
 		spec, err := repoClient.getServerSpecWithRateLimit(ctx, server.Name, &rateLimitInfo)
 		if err != nil {
 			syncErrors = append(syncErrors, fmt.Sprintf("failed to get spec for %s: %v", server.Name, err))
+			continue
+		}
+		if spec == nil {
+			// Server doesn't have server.yaml file (404) - skip it
 			continue
 		}
 		serverSpecs[server.Name] = spec

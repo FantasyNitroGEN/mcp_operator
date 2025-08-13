@@ -38,10 +38,19 @@ spec:
   refreshInterval: {{ . | quote }}
   {{- end }}
   {{- with .Values.registry.auth }}
-  {{- with .secretName }}
   auth:
+    {{- with .secretName }}
     secretRef:
       name: {{ . | quote }}
-  {{- end }}
+      {{- with $.Values.registry.auth.secretKey }}
+      key: {{ . | quote }}
+      {{- end }}
+      {{- with $.Values.registry.auth.optional }}
+      optional: {{ . }}
+      {{- end }}
+    {{- end }}
+    {{- with .token }}
+    token: {{ . | quote }}
+    {{- end }}
   {{- end }}
 {{- end }}

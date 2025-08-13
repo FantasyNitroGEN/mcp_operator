@@ -26,7 +26,7 @@ type RegistryService interface {
 	ForceEnrichMCPServer(ctx context.Context, mcpServer *mcpv1.MCPServer, registryName string) error
 
 	// EnrichMCPServerFromCache enriches MCPServer with registry data from ConfigMap cache
-	EnrichMCPServerFromCache(ctx context.Context, mcpServer *mcpv1.MCPServer) error
+	EnrichMCPServerFromCache(ctx context.Context, mcpServer *mcpv1.MCPServer, namespace string) error
 
 	// SyncRegistry synchronizes registry data
 	SyncRegistry(ctx context.Context, registry *mcpv1.MCPRegistry) error
