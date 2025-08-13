@@ -101,11 +101,7 @@ rules:
   - mcp.allbeone.io
   resources:
   - mcpregistries
-  - mcpserverbackups
-  - mcpservers
   verbs:
-  - create
-  - delete
   - get
   - list
   - patch
@@ -129,6 +125,19 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - mcp.allbeone.io
+  resources:
+  - mcpserverbackups
+  - mcpservers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - networking.istio.io
   resources:

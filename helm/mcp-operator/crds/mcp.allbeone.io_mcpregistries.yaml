@@ -197,6 +197,11 @@ spec:
                 description: Message provides human-readable information about the
                   registry status
                 type: string
+              observedGeneration:
+                description: ObservedGeneration reflects the generation of the most
+                  recently observed MCPRegistry
+                format: int64
+                type: integer
               observedRevision:
                 description: ObservedRevision contains the SHA/etag of the last observed
                   revision
@@ -214,7 +219,7 @@ spec:
                 type: string
               serverList:
                 description: ServerList contains information about available servers
-                  in the registry
+                  in the registry (deprecated, use Servers)
                 items:
                   description: MCPServerInfo contains information about a server available
                     in the registry
@@ -232,6 +237,31 @@ spec:
                       type: string
                     version:
                       description: Version of the server
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              servers:
+                description: Servers contains information about available servers
+                  in the registry
+                items:
+                  description: RegistryServer contains information about a server
+                    available in the registry
+                  properties:
+                    description:
+                      type: string
+                    name:
+                      type: string
+                    path:
+                      type: string
+                    tags:
+                      items:
+                        type: string
+                      type: array
+                    title:
+                      type: string
+                    version:
                       type: string
                   required:
                   - name

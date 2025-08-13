@@ -78,7 +78,7 @@ rules:
   - get
   - patch
   - update
-# Core resources
+# класть кэш/индекс
 - apiGroups:
   - ""
   resources:
@@ -86,7 +86,6 @@ rules:
   verbs:
   - get
   - list
-  - watch
   - create
   - update
   - patch
@@ -99,10 +98,8 @@ rules:
     - get
     - list
     - watch
-    - create
     - update
     - patch
-    - delete
 - apiGroups:
     - mcp.allbeone.io
   resources:
@@ -117,6 +114,7 @@ rules:
     - mcpregistries/finalizers
   verbs:
     - update
+# читать токен из Secret (если нужен GitHub token)
 - apiGroups:
   - ""
   resources:
@@ -124,10 +122,6 @@ rules:
   verbs:
   - get
   - list
-  - watch
-  - create
-  - update
-  - patch
 {{- if .Values.backup.enabled }}
 # Additional secrets access when backup functionality is enabled (kept for backward compatibility)
 {{- end }}

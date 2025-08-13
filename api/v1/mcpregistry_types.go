@@ -34,6 +34,16 @@ type RegistryFilters struct {
 	Exclude []string `json:"exclude,omitempty"`
 }
 
+// RegistryServer contains information about a server available in the registry
+type RegistryServer struct {
+	Name        string   `json:"name"`
+	Title       string   `json:"title,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Version     string   `json:"version,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Path        string   `json:"path,omitempty"`
+}
+
 // MCPRegistrySpec defines the desired state of MCPRegistry
 type MCPRegistrySpec struct {
 	// URL is the base URL of the MCP registry
@@ -87,6 +97,9 @@ type MCPRegistryStatus struct {
 	// LastSyncTime is the last time the registry was successfully synced
 	LastSyncTime *metav1.Time `json:"lastSyncTime,omitempty"`
 
+	// ObservedGeneration reflects the generation of the most recently observed MCPRegistry
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// ServersDiscovered is the number of servers discovered in this registry
 	ServersDiscovered int32 `json:"serversDiscovered,omitempty"`
 
@@ -102,7 +115,10 @@ type MCPRegistryStatus struct {
 	// Conditions represent the latest available observations of the registry's state
 	Conditions []MCPRegistryCondition `json:"conditions,omitempty"`
 
-	// ServerList contains information about available servers in the registry
+	// Servers contains information about available servers in the registry
+	Servers []RegistryServer `json:"servers,omitempty"`
+
+	// ServerList contains information about available servers in the registry (deprecated, use Servers)
 	ServerList []MCPServerInfo `json:"serverList,omitempty"`
 }
 
@@ -150,6 +166,9 @@ const (
 
 	// MCPRegistryConditionSynced indicates whether the registry has been synced
 	MCPRegistryConditionSynced MCPRegistryConditionType = "Synced"
+
+	// MCPRegistryConditionReachable indicates whether the registry is reachable
+	MCPRegistryConditionReachable MCPRegistryConditionType = "Reachable"
 
 	// MCPRegistryConditionSyncing indicates whether the registry is currently syncing
 	MCPRegistryConditionSyncing MCPRegistryConditionType = "Syncing"

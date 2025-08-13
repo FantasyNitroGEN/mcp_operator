@@ -29,12 +29,12 @@ type MCPRegistryReconciler struct {
 	Recorder record.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpregistries,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpregistries,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpregistries/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpregistries/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;create;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -62,7 +62,8 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if mcpRegistry.Spec.Source == nil || mcpRegistry.Spec.Source.Type != "github" || mcpRegistry.Spec.Source.Github == nil {
 		err := fmt.Errorf("only GitHub source type is supported currently")
 		logger.Error(err, "Invalid source configuration")
-		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReady, metav1.ConditionFalse, "InvalidSource", err.Error())
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "InvalidSource", err.Error())
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSynced, metav1.ConditionFalse, "InvalidSource", err.Error())
 		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "ValidationFailed", err.Error())
 		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
 			logger.Error(statusErr, "Failed to update status")
@@ -84,7 +85,8 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		logger.Error(err, "Failed to get authentication token")
 		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionAuthFailed, metav1.ConditionTrue, "AuthTokenFailed", err.Error())
-		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReady, metav1.ConditionFalse, "AuthTokenFailed", err.Error())
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "AuthTokenFailed", err.Error())
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSynced, metav1.ConditionFalse, "AuthTokenFailed", err.Error())
 		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "AuthFailed", err.Error())
 		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
 			logger.Error(statusErr, "Failed to update status")
@@ -113,7 +115,8 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		logger.Error(err, "Failed to sync registry")
 		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSyncing, metav1.ConditionFalse, "SyncFailed", err.Error())
-		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReady, metav1.ConditionFalse, "SyncFailed", err.Error())
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "SyncFailed", err.Error())
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSynced, metav1.ConditionFalse, "SyncFailed", err.Error())
 		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "SyncFailed", err.Error())
 		mcpRegistry.Status.Phase = mcpv1.MCPRegistryPhaseFailed
 		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
@@ -139,11 +142,54 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
+	// Create registry index and cache it
+	registryIndex := &registry.RegistryIndex{
+		Name:         mcpRegistry.Name,
+		Description:  fmt.Sprintf("MCP Registry index for %s", mcpRegistry.Name),
+		LastUpdated:  time.Now(),
+		ServersCount: syncResult.ServersCount,
+		Servers:      syncResult.Servers,
+		Metadata: map[string]string{
+			"source": mcpRegistry.Spec.Source.Github.Repo,
+			"branch": mcpRegistry.Spec.Source.Github.Branch,
+			"path":   mcpRegistry.Spec.Source.Path,
+		},
+	}
+
+	// Cache the registry index
+	if err := cacheManager.CacheIndex(ctx, mcpRegistry.Name, registryIndex, mcpRegistry); err != nil {
+		logger.Error(err, "Failed to cache registry index")
+		cacheErrors = append(cacheErrors, fmt.Sprintf("failed to cache registry index: %v", err))
+	}
+
+	// Convert MCPServerInfo to RegistryServer for status
+	var registryServers []mcpv1.RegistryServer
+	for _, server := range syncResult.Servers {
+		registryServer := mcpv1.RegistryServer{
+			Name: server.Name,
+			Path: server.Path,
+		}
+
+		// Add additional info from server spec if available
+		if serverSpec, ok := syncResult.ServerSpecs[server.Name]; ok {
+			registryServer.Title = serverSpec.Name
+			registryServer.Description = serverSpec.Description
+			registryServer.Version = serverSpec.Version
+			if len(serverSpec.Keywords) > 0 {
+				registryServer.Tags = serverSpec.Keywords
+			}
+		}
+
+		registryServers = append(registryServers, registryServer)
+	}
+
 	// Update status with sync results
 	now := metav1.Now()
 	mcpRegistry.Status.LastSyncTime = &now
 	mcpRegistry.Status.ServersDiscovered = syncResult.ServersCount
 	mcpRegistry.Status.ObservedRevision = syncResult.ObservedSHA
+	mcpRegistry.Status.ObservedGeneration = mcpRegistry.Generation
+	mcpRegistry.Status.Servers = registryServers
 	mcpRegistry.Status.Phase = mcpv1.MCPRegistryPhaseReady
 
 	// Update errors in status
@@ -181,7 +227,8 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Set successful conditions
 	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSyncing, metav1.ConditionFalse, "SyncCompleted", "Registry synchronization completed")
-	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReady, metav1.ConditionTrue, "SyncSuccessful",
+	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionTrue, "OK", "Registry is reachable")
+	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSynced, metav1.ConditionTrue, "OK",
 		fmt.Sprintf("Registry synchronized successfully, %d servers discovered", syncResult.ServersCount))
 	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionAuthFailed, metav1.ConditionFalse, "AuthSuccessful", "Authentication successful")
 
