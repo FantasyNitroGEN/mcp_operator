@@ -26,11 +26,11 @@ type DefaultRegistryService struct {
 // getGitHubTokenFromSecret reads GitHub token from Kubernetes secret
 // Supports both "token" and "GITHUB_TOKEN" keys for compatibility
 func (r *DefaultRegistryService) getGitHubTokenFromSecret(ctx context.Context, secretRef *mcpv1.SecretReference, namespace string) (string, error) {
-	logger := log.FromContext(ctx).WithValues("secret", secretRef.Name, "namespace", namespace)
-
 	if secretRef == nil {
 		return "", nil
 	}
+
+	logger := log.FromContext(ctx).WithValues("secret", secretRef.Name, "namespace", namespace)
 
 	secret := &corev1.Secret{}
 	err := r.client.Get(ctx, types.NamespacedName{
