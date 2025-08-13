@@ -9,9 +9,7 @@ import (
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -102,43 +100,19 @@ func (c *CacheManager) CacheIndex(ctx context.Context, registryName string, inde
 		},
 	}
 
-	// Set owner reference
+	// Set controller reference
 	if err := controllerutil.SetControllerReference(mcpRegistry, configMap, c.Scheme()); err != nil {
-		return fmt.Errorf("failed to set owner reference: %w", err)
+		return fmt.Errorf("failed to set controller reference: %w", err)
 	}
 
-	// Check if ConfigMap already exists
-	existing := &corev1.ConfigMap{}
-	err = c.Get(ctx, types.NamespacedName{
-		Name:      configMapName,
-		Namespace: mcpRegistry.Namespace,
-	}, existing)
+	logger.Info("Applying index ConfigMap using server-side apply",
+		"configMap", configMapName,
+		"registry", registryName,
+		"namespace", mcpRegistry.Namespace)
 
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Create new ConfigMap
-			logger.Info("Creating registry index ConfigMap",
-				"configMap", configMapName,
-				"registry", registryName)
-
-			if err := c.Create(ctx, configMap); err != nil {
-				return fmt.Errorf("failed to create index ConfigMap: %w", err)
-			}
-		} else {
-			return fmt.Errorf("failed to get index ConfigMap: %w", err)
-		}
-	} else {
-		// Update existing ConfigMap
-		logger.Info("Updating registry index ConfigMap",
-			"configMap", configMapName,
-			"registry", registryName)
-
-		existing.Data = configMap.Data
-		existing.Labels = configMap.Labels
-
-		if err := c.Update(ctx, existing); err != nil {
-			return fmt.Errorf("failed to update index ConfigMap: %w", err)
-		}
+	// Use server-side apply with Patch
+	if err := c.Patch(ctx, configMap, client.Apply, client.FieldOwner("mcp-operator"), client.ForceOwnership); err != nil {
+		return fmt.Errorf("failed to apply index ConfigMap: %w", err)
 	}
 
 	return nil

@@ -117,6 +117,7 @@ jobs:
           else
             helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
             helm repo update
+            helm upgrade --install mcp-operator mcp-operator/mcp-operator \
               --namespace mcp --create-namespace \
               --set registry.enabled=true \
               --set registry.auth.secretName=mcp-gh-token \
@@ -133,6 +134,28 @@ jobs:
           # 3) ждём раскатку
           kubectl -n mcp rollout status deploy/mcp-operator --timeout=300s
 
+      - name: MCPRegistry spec is github source (no url)
+        run: |
+          set -e
+          echo "Rendered MCPRegistry.spec:"
+          kubectl -n mcp get mcpregistry default-registry -o json | jq '.spec'
+
+          URL="$(kubectl -n mcp get mcpregistry default-registry -o jsonpath='{.spec.url}' 2>/dev/null || true)"
+          if [ -n "$URL" ]; then
+            echo "::error::.spec.url is set but controller supports only source.github; got: $URL"
+            exit 1
+          fi
+
+          REPO="$(kubectl -n mcp get mcpregistry default-registry -o jsonpath='{.spec.source.github.repo}' 2>/dev/null || true)"
+          if [ "$REPO" != "docker/mcp-registry" ]; then
+            echo "::error::.spec.source.github.repo unexpected: '$REPO'"
+            echo "Got: '${REPO:-<empty>}' ; Want: 'docker/mcp-registry'"
+            exit 1
+          fi
+
+          BRANCH="$(kubectl -n mcp get mcpregistry default-registry -o jsonpath='{.spec.source.github.branch}' 2>/dev/null || true)"
+          echo "Branch: ${BRANCH:-<empty>} (ok if 'main')"
+
       - name: operator health & CRDs
         run: |
           set -e
@@ -141,6 +164,15 @@ jobs:
           kubectl get crd | grep 'mcp\.allbeone\.io' || true
           echo "--- recent events ---"
           kubectl -n mcp get events --sort-by=.lastTimestamp | tail -n 50 || true
+
+      - name: operator RBAC for core
+        run: |
+          set -e
+          echo "configmaps watch:"
+          kubectl auth can-i --as system:serviceaccount:mcp:mcp-operator watch configmaps
+          echo "secrets watch:"
+          kubectl auth can-i --as system:serviceaccount:mcp:mcp-operator watch secrets
+      
 
       - name: Health check endpoints
         run: |
@@ -192,7 +224,16 @@ jobs:
         run: |
           set -e
           kubectl -n mcp wait mcpregistry/default-registry \
-            --for=jsonpath='{.status.conditions[?(@.type=="Synced")].status}'=True --timeout=240s
+            --for=jsonpath='{.status.conditions[?(@.type=="Synced")].status}'=True --timeout=300s || {
+            echo "::error::Registry didn't sync in time"
+            echo "--- conditions:"
+            kubectl -n mcp get mcpregistry default-registry -o jsonpath='{.status.conditions}'; echo
+            echo "--- describe:"
+            kubectl -n mcp describe mcpregistry default-registry | sed -n '1,200p' || true
+            echo "--- operator logs (last 200):"
+            kubectl -n mcp logs deploy/mcp-operator --since=10m | tail -n 200 || true
+            exit 1
+          }
           echo "Discovered servers:"
           kubectl -n mcp get mcpregistry default-registry -o jsonpath='{range .status.servers[*]}{.name}{"\n"}{end}' || true
 

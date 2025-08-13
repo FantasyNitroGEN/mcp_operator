@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -83,6 +84,19 @@ func NewClientWithRetryConfig(retryConfig retry.GitHubRetryConfig) *Client {
 	}
 }
 
+// contentsURL properly constructs GitHub Contents API URL with path escaping
+func contentsURL(repo, p, ref string) string {
+	p = strings.Trim(p, "/") // Remove leading/trailing slashes
+	base := fmt.Sprintf("https://api.github.com/repos/%s/contents", repo)
+	if p != "" {
+		base += "/" + url.PathEscape(p)
+	}
+	if ref != "" {
+		base += "?ref=" + url.QueryEscape(ref)
+	}
+	return base
+}
+
 // ListServers получает список всех MCP серверов из реестра
 func (c *Client) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
 	var servers []MCPServerInfo
@@ -94,7 +108,7 @@ func (c *Client) ListServers(ctx context.Context) ([]MCPServerInfo, error) {
 		}
 
 		req.Header.Set("User-Agent", c.userAgent)
-		req.Header.Set("Accept", "application/vnd.github.v3+json")
+		req.Header.Set("Accept", "application/vnd.github+json")
 
 		if c.githubToken != "" {
 			req.Header.Set("Authorization", "token "+c.githubToken)
@@ -296,7 +310,7 @@ func (c *Client) listServersWithRateLimit(ctx context.Context, rateLimitInfo **R
 		}
 
 		req.Header.Set("User-Agent", c.userAgent)
-		req.Header.Set("Accept", "application/vnd.github.v3+json")
+		req.Header.Set("Accept", "application/vnd.github+json")
 
 		if c.githubToken != "" {
 			req.Header.Set("Authorization", "token "+c.githubToken)
@@ -307,9 +321,17 @@ func (c *Client) listServersWithRateLimit(ctx context.Context, rateLimitInfo **R
 			return resp, fmt.Errorf("failed to execute request: %w", err)
 		}
 
+		// Log full URL and HTTP status code for debugging
+		fmt.Printf("registry list: url=%s status=%d\n", c.baseURL, resp.StatusCode)
+
 		// Extract rate limit information
 		if *rateLimitInfo == nil {
 			*rateLimitInfo = c.extractRateLimitInfo(resp)
+		}
+
+		if resp.StatusCode == http.StatusNotFound {
+			// 404 on root path indicates configuration error (path/branch not found)
+			return resp, fmt.Errorf("PathNotFound: %s", c.baseURL)
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -354,7 +376,7 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 	var spec *MCPServerSpec
 
 	err := c.githubRetrier.DoWithGitHubRetry(ctx, "get_server_spec", func(ctx context.Context) (*http.Response, error) {
-		specURL := fmt.Sprintf("%s/%s/server.yaml", c.baseURL, serverName)
+		specURL := fmt.Sprintf("%s/%s/server.yaml", c.baseURL, url.PathEscape(serverName))
 
 		req, err := http.NewRequestWithContext(ctx, "GET", specURL, nil)
 		if err != nil {
@@ -362,7 +384,7 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 		}
 
 		req.Header.Set("User-Agent", c.userAgent)
-		req.Header.Set("Accept", "application/vnd.github.v3+json")
+		req.Header.Set("Accept", "application/vnd.github.raw")
 
 		if c.githubToken != "" {
 			req.Header.Set("Authorization", "token "+c.githubToken)
@@ -372,6 +394,9 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 		if err != nil {
 			return resp, fmt.Errorf("failed to execute request: %w", err)
 		}
+
+		// Log full URL and HTTP status code for debugging
+		fmt.Printf("fetch server.yaml: url=%s status=%d dir=%s\n", specURL, resp.StatusCode, serverName)
 
 		// Update rate limit information with most recent data
 		*rateLimitInfo = c.extractRateLimitInfo(resp)
@@ -560,14 +585,13 @@ func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*S
 		githubToken:   repo.AuthToken,
 	}
 
-	// Формируем URL для GitHub API
+	// Формируем правильный path для серверов
 	path := "servers"
 	if repo.Path != "" {
-		path = strings.TrimPrefix(repo.Path, "/")
-		if !strings.HasSuffix(path, "/") {
-			path += "/"
+		repoPath := strings.TrimPrefix(strings.TrimSuffix(repo.Path, "/"), "/")
+		if repoPath != "" {
+			path = repoPath + "/servers"
 		}
-		path += "servers"
 	}
 
 	branch := repo.Branch
@@ -575,8 +599,8 @@ func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*S
 		branch = "main"
 	}
 
-	repoClient.baseURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s",
-		repo.Owner, repo.Name, path, branch)
+	// Используем новую функцию contentsURL с правильным экранированием
+	repoClient.baseURL = contentsURL(fmt.Sprintf("%s/%s", repo.Owner, repo.Name), path, branch)
 
 	// Получаем список серверов и rate limit info
 	var rateLimitInfo *RateLimitInfo

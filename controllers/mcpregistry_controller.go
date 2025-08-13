@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -11,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -68,7 +70,7 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "InvalidConfiguration", err.Error())
 		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSynced, metav1.ConditionFalse, "InvalidConfiguration", err.Error())
 		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "ValidationFailed", err.Error())
-		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
+		if statusErr := r.updateStatusWithRetry(ctx, mcpRegistry); statusErr != nil {
 			logger.Error(statusErr, "Failed to update status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
@@ -78,7 +80,7 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSyncing, metav1.ConditionTrue, "SyncInProgress", "Registry synchronization in progress")
 	mcpRegistry.Status.Phase = mcpv1.MCPRegistryPhaseSyncing
 
-	if err := r.updateStatus(ctx, mcpRegistry); err != nil {
+	if err := r.updateStatusWithRetry(ctx, mcpRegistry); err != nil {
 		logger.Error(err, "Failed to update status to syncing")
 		return ctrl.Result{}, err
 	}
@@ -91,7 +93,7 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "AuthTokenFailed", err.Error())
 		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSynced, metav1.ConditionFalse, "AuthTokenFailed", err.Error())
 		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "AuthFailed", err.Error())
-		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
+		if statusErr := r.updateStatusWithRetry(ctx, mcpRegistry); statusErr != nil {
 			logger.Error(statusErr, "Failed to update status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
@@ -118,11 +120,19 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		logger.Error(err, "Failed to sync registry")
 		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSyncing, metav1.ConditionFalse, "SyncFailed", err.Error())
-		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "SyncFailed", err.Error())
+
+		// Check if this is a PathNotFound error (404 on root path)
+		if strings.Contains(err.Error(), "PathNotFound:") {
+			r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "PathNotFound", err.Error())
+			logger.Error(err, "Registry path not found - check repository, branch, and path configuration")
+		} else {
+			r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "SyncFailed", err.Error())
+		}
+
 		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSynced, metav1.ConditionFalse, "SyncFailed", err.Error())
 		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "SyncFailed", err.Error())
 		mcpRegistry.Status.Phase = mcpv1.MCPRegistryPhaseFailed
-		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
+		if statusErr := r.updateStatusWithRetry(ctx, mcpRegistry); statusErr != nil {
 			logger.Error(statusErr, "Failed to update status")
 		}
 		return ctrl.Result{RequeueAfter: time.Minute * 15}, nil
@@ -239,7 +249,7 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		fmt.Sprintf("Registry synchronized successfully, %d servers discovered", syncResult.ServersCount))
 
 	// Update final status
-	if err := r.updateStatus(ctx, mcpRegistry); err != nil {
+	if err := r.updateStatusWithRetry(ctx, mcpRegistry); err != nil {
 		logger.Error(err, "Failed to update final status")
 		return ctrl.Result{}, err
 	}
@@ -340,6 +350,41 @@ func (r *MCPRegistryReconciler) setCondition(mcpRegistry *mcpv1.MCPRegistry, con
 // updateStatus updates the MCPRegistry status
 func (r *MCPRegistryReconciler) updateStatus(ctx context.Context, mcpRegistry *mcpv1.MCPRegistry) error {
 	return r.Status().Update(ctx, mcpRegistry)
+}
+
+// updateStatusWithRetry updates the MCPRegistry status with exponential backoff for conflicts
+func (r *MCPRegistryReconciler) updateStatusWithRetry(ctx context.Context, mcpRegistry *mcpv1.MCPRegistry) error {
+	logger := log.FromContext(ctx)
+
+	return wait.ExponentialBackoff(wait.Backoff{
+		Duration: 100 * time.Millisecond,
+		Factor:   2.0,
+		Jitter:   0.1,
+		Steps:    5,
+	}, func() (bool, error) {
+		err := r.Status().Update(ctx, mcpRegistry)
+		if err == nil {
+			return true, nil // Success
+		}
+
+		if errors.IsConflict(err) {
+			logger.V(1).Info("Status update conflict, retrying with backoff", "error", err.Error())
+			// Get the latest version before retrying
+			latest := &mcpv1.MCPRegistry{}
+			if getErr := r.Get(ctx, types.NamespacedName{
+				Name:      mcpRegistry.Name,
+				Namespace: mcpRegistry.Namespace,
+			}, latest); getErr == nil {
+				// Copy our status to the latest version
+				latest.Status = mcpRegistry.Status
+				*mcpRegistry = *latest
+			}
+			return false, nil // Retry
+		}
+
+		// Non-conflict error, don't retry
+		return false, err
+	})
 }
 
 // SetupWithManager sets up the controller with the Manager.
