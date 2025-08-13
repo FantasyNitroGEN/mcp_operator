@@ -40,10 +40,20 @@ jobs:
       - name: Ensure namespace mcp exists
         run: kubectl create namespace mcp || true
 
-      - name: Create GitHub token secret (optional, for load testing)
+      - name: Create GitHub token Secret
+        env:
+          MCP_GH_TOKEN: ${{ secrets.MCP_GH_TOKEN }}
         run: |
-          [ -n "${{ secrets.GH_PAT }}" ] && \
-          kubectl -n mcp create secret generic gh-token --from-literal=token='${{ secrets.GH_PAT }}' || true
+          set -e
+          if [ -z "$MCP_GH_TOKEN" ]; then
+            echo "::warning::MCP_GH_TOKEN is empty; proceeding without token (rate limit may be low)"
+            exit 0
+          fi
+          # создаём/обновляем секрет БЕЗ печати токена в логи
+          kubectl -n mcp create secret generic mcp-gh-token \
+            --from-literal=token="$MCP_GH_TOKEN" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+          echo "Secret mcp-gh-token applied"
 
       - name: Assert chart CRDs layout (crds/ only)
         run: |
@@ -97,12 +107,16 @@ jobs:
           # 1) ставим чарт в ns mcp
           if [ -d ./helm/mcp-operator ]; then
             helm upgrade --install mcp-operator ./helm/mcp-operator \
-              --namespace mcp --create-namespace
+              --namespace mcp --create-namespace \
+              --set registry.enabled=true \
+              --set registry.auth.secretName=mcp-gh-token
           else
             helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
             helm repo update
             helm upgrade --install mcp-operator mcp-operator/mcp-operator \
-              --namespace mcp --create-namespace
+              --namespace mcp --create-namespace \
+              --set registry.enabled=true \
+              --set registry.auth.secretName=mcp-gh-token
           fi
 
           # 2) принудительно ставим образ ghcr latest (без условий)

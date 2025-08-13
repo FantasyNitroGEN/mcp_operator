@@ -40,7 +40,16 @@ registry:
   # Authentication configuration
   auth:
     # Secret name containing authentication credentials
-    secretName: ""
+    secretName: "mcp-gh-token"
+    
+    # Secret key within the secret (optional, defaults to token)
+    secretKey: ""
+    
+    # Whether the secret is optional (defaults to false)
+    optional: false
+    
+    # Direct token value (alternative to secretName, not recommended for production)
+    token: ""
 
 # Operator configuration
 operator:
