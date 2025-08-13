@@ -109,6 +109,7 @@ jobs:
             helm upgrade --install mcp-operator ./helm/mcp-operator \
               --namespace mcp --create-namespace \
               --set registry.enabled=true \
+              --set registry.url="https://api.github.com/repos/docker/mcp-registry/contents/servers?ref=main" \
               --set registry.auth.secretName=mcp-gh-token
           else
             helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
@@ -116,6 +117,7 @@ jobs:
             helm upgrade --install mcp-operator mcp-operator/mcp-operator \
               --namespace mcp --create-namespace \
               --set registry.enabled=true \
+              --set registry.url="https://api.github.com/repos/docker/mcp-registry/contents/servers?ref=main" \
               --set registry.auth.secretName=mcp-gh-token
           fi
 
