@@ -181,7 +181,23 @@ jobs:
           # доп.проверка, что API зарегистрирован
           kubectl api-resources --api-group=mcp.allbeone.io | grep -E 'MCPServer|MCPServerBackup|MCPRegistry'
 
-      # --- Deploy MCP Postgres server from registry ---
+      - name: Wait MCPRegistry synced + list servers
+        run: |
+          set -e
+          kubectl -n mcp wait mcpregistry/default-registry \
+            --for=jsonpath='{.status.conditions[?(@.type=="Synced")].status}'=True --timeout=240s
+          echo "Discovered servers:"
+          kubectl -n mcp get mcpregistry default-registry -o jsonpath='{range .status.servers[*]}{.name}{"\n"}{end}' || true
+
+      - name: Assert CM cache for postgres exists
+        run: |
+          if ! kubectl -n mcp get cm mcpregistry-default-registry-postgres >/dev/null 2>&1; then
+            echo "::error::Registry cache for 'postgres' not found — check registry contents or server name"
+            kubectl -n mcp get cm | grep mcpregistry-default-registry || true
+            exit 1
+          fi
+
+        # --- Deploy MCP Postgres server from registry ---
       - name: Deploy MCP server (postgres) from registry
         run: |
           set -e

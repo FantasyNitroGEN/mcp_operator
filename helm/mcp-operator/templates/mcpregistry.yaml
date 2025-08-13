@@ -12,8 +12,15 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- with .Values.registry.url }}
-  url: {{ . | quote }}
+  {{- $repo := .Values.registry.source.repo | default "" -}}
+  {{- $path := .Values.registry.source.path | default "servers" -}}
+  {{- $branch := .Values.registry.source.branch | default "" -}}
+  {{- if .Values.registry.url }}
+  url: {{ .Values.registry.url | quote }}
+  {{- else if and (eq .Values.registry.source.type "github") $repo }}
+  {{- $branchParam := "" -}}
+  {{- if $branch }}{{- $branchParam = printf "?ref=%s" $branch }}{{- end }}
+  url: {{ printf "https://api.github.com/repos/%s/contents/%s%s" $repo $path $branchParam | quote }}
   {{- end }}
   {{- with .Values.registry.source }}
   {{- with .type }}

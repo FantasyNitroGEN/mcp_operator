@@ -168,8 +168,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			)
 			metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.RegistryName, "error", time.Since(registryStartTime).Seconds())
 			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRegistryFetched,
-				string(metav1.ConditionFalse), "RegistryMissing", fmt.Sprintf("Registry cache missing: %v", err))
-			r.EventService.RecordWarning(mcpServer, "RegistryMissing", fmt.Sprintf("Registry cache missing: %v", err))
+				string(metav1.ConditionFalse), "CacheMissing", fmt.Sprintf("Registry cache missing: %v", err))
+			r.EventService.RecordWarning(mcpServer, "CacheMissing", fmt.Sprintf("Registry cache missing: %v", err))
 
 			// Update status once and return without requeue - cache errors will be retried when ConfigMap is created
 			if statusErr := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); statusErr != nil {
