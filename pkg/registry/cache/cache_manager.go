@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/registry"
@@ -15,7 +17,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// CacheManager manages ConfigMap caching for registry servers
+// DNS-1123 compliant name sanitizer
+var dns1123Re = regexp.MustCompile(`[^a-z0-9\-\.]`)
+
+func dns1123Name(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "_", "-")
+	s = strings.ReplaceAll(s, " ", "-")
+	s = dns1123Re.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-.")
+	if s == "" {
+		s = "server"
+	}
+	if len(s) > 253 {
+		s = s[:253]
+	}
+	return s
+}
+
 type CacheManager struct {
 	client.Client
 }
@@ -37,16 +56,26 @@ func (c *CacheManager) CacheServer(ctx context.Context, registryName string, ser
 		return fmt.Errorf("failed to marshal server spec: %w", err)
 	}
 
-	configMapName := fmt.Sprintf("mcpregistry-%s-%s", registryName, serverInfo.Name)
+	orig := serverInfo.Name   // original name from directory
+	safe := dns1123Name(orig) // DNS-1123 compliant name for resource
+	configMapName := fmt.Sprintf("mcpregistry-%s-%s", registryName, safe)
+
 	configMap := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{ // Required for SSA - fixes "invalid object type" error
+			APIVersion: "v1",
+			Kind:       "ConfigMap",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      configMapName,
 			Namespace: mcpRegistry.Namespace,
 			Labels: map[string]string{
 				"mcp.allbeone.io/registry":  registryName,
-				"mcp.allbeone.io/server":    serverInfo.Name,
+				"mcp.allbeone.io/server":    safe, // use safe name for selectors
 				"app.kubernetes.io/name":    "mcp-operator",
 				"app.kubernetes.io/part-of": "mcp-registry",
+			},
+			Annotations: map[string]string{
+				"mcp.allbeone.io/server-original": orig, // preserve human-readable original name
 			},
 		},
 		Data: map[string]string{
@@ -62,7 +91,7 @@ func (c *CacheManager) CacheServer(ctx context.Context, registryName string, ser
 	logger.Info("Applying server ConfigMap using server-side apply",
 		"configMap", configMapName,
 		"registry", registryName,
-		"server", serverInfo.Name,
+		"server", orig,
 		"namespace", mcpRegistry.Namespace)
 
 	// Use server-side apply with Patch
@@ -85,6 +114,10 @@ func (c *CacheManager) CacheIndex(ctx context.Context, registryName string, inde
 
 	configMapName := fmt.Sprintf("mcpregistry-%s-index", registryName)
 	configMap := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{ // Required for SSA - fixes "invalid object type" error
+			APIVersion: "v1",
+			Kind:       "ConfigMap",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      configMapName,
 			Namespace: mcpRegistry.Namespace,
