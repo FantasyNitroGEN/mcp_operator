@@ -347,11 +347,6 @@ func (r *MCPRegistryReconciler) setCondition(mcpRegistry *mcpv1.MCPRegistry, con
 	mcpRegistry.Status.Conditions = append(mcpRegistry.Status.Conditions, condition)
 }
 
-// updateStatus updates the MCPRegistry status
-func (r *MCPRegistryReconciler) updateStatus(ctx context.Context, mcpRegistry *mcpv1.MCPRegistry) error {
-	return r.Status().Update(ctx, mcpRegistry)
-}
-
 // updateStatusWithRetry updates the MCPRegistry status with exponential backoff for conflicts
 func (r *MCPRegistryReconciler) updateStatusWithRetry(ctx context.Context, mcpRegistry *mcpv1.MCPRegistry) error {
 	logger := log.FromContext(ctx)
