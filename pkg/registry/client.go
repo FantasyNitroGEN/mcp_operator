@@ -84,12 +84,30 @@ func NewClientWithRetryConfig(retryConfig retry.GitHubRetryConfig) *Client {
 	}
 }
 
-// contentsURL properly constructs GitHub Contents API URL with path escaping
-func contentsURL(repo, p, ref string) string {
-	p = strings.Trim(p, "/") // Remove leading/trailing slashes
-	base := fmt.Sprintf("https://api.github.com/repos/%s/contents", repo)
-	if p != "" {
-		base += "/" + url.PathEscape(p)
+// joinPathEsc безопасно склеивает сегменты пути и экранирует ТОЛЬКО сегменты, а не слеши.
+func joinPathEsc(parts ...string) string {
+	var allSegs []string
+	for _, p := range parts {
+		p = strings.Trim(p, "/")
+		if p == "" {
+			continue
+		}
+		// Split each part by '/' to get individual segments
+		segments := strings.Split(p, "/")
+		for _, seg := range segments {
+			if seg != "" {
+				allSegs = append(allSegs, url.PathEscape(seg))
+			}
+		}
+	}
+	return strings.Join(allSegs, "/")
+}
+
+// ghContentsURL собирает правильный URL для GitHub Contents API.
+func ghContentsURL(repo, p, ref string) string {
+	base := "https://api.github.com/repos/" + repo + "/contents"
+	if s := joinPathEsc(p); s != "" {
+		base += "/" + s
 	}
 	if ref != "" {
 		base += "?ref=" + url.QueryEscape(ref)
@@ -585,13 +603,10 @@ func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*S
 		githubToken:   repo.AuthToken,
 	}
 
-	// Формируем правильный path для серверов
-	path := "servers"
-	if repo.Path != "" {
-		repoPath := strings.TrimPrefix(strings.TrimSuffix(repo.Path, "/"), "/")
-		if repoPath != "" {
-			path = repoPath + "/servers"
-		}
+	// Нормализуем базовый путь к реестру
+	basePath := strings.Trim(repo.Path, "/")
+	if basePath == "" {
+		basePath = "servers"
 	}
 
 	branch := repo.Branch
@@ -599,8 +614,8 @@ func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*S
 		branch = "main"
 	}
 
-	// Используем новую функцию contentsURL с правильным экранированием
-	repoClient.baseURL = contentsURL(fmt.Sprintf("%s/%s", repo.Owner, repo.Name), path, branch)
+	// Используем новую функцию ghContentsURL с правильным экранированием
+	repoClient.baseURL = ghContentsURL(fmt.Sprintf("%s/%s", repo.Owner, repo.Name), basePath, branch)
 
 	// Получаем список серверов и rate limit info
 	var rateLimitInfo *RateLimitInfo
