@@ -58,12 +58,15 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.handleDeletion(ctx, logger, mcpRegistry)
 	}
 
-	// Validate that source is configured
-	if mcpRegistry.Spec.Source == nil || mcpRegistry.Spec.Source.Type != "github" || mcpRegistry.Spec.Source.Github == nil {
-		err := fmt.Errorf("only GitHub source type is supported currently")
-		logger.Error(err, "Invalid source configuration")
-		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "InvalidSource", err.Error())
-		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSynced, metav1.ConditionFalse, "InvalidSource", err.Error())
+	// Validate that either source is configured OR url is provided
+	hasValidSource := mcpRegistry.Spec.Source != nil && mcpRegistry.Spec.Source.Type == "github" && mcpRegistry.Spec.Source.Github != nil
+	hasValidURL := mcpRegistry.Spec.URL != ""
+
+	if !hasValidSource && !hasValidURL {
+		err := fmt.Errorf("either spec.url must be provided or spec.source.type=github with valid github configuration must be set")
+		logger.Error(err, "Invalid configuration")
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionReachable, metav1.ConditionFalse, "InvalidConfiguration", err.Error())
+		r.setCondition(mcpRegistry, mcpv1.MCPRegistryConditionSynced, metav1.ConditionFalse, "InvalidConfiguration", err.Error())
 		r.Recorder.Event(mcpRegistry, corev1.EventTypeWarning, "ValidationFailed", err.Error())
 		if statusErr := r.updateStatus(ctx, mcpRegistry); statusErr != nil {
 			logger.Error(statusErr, "Failed to update status")
