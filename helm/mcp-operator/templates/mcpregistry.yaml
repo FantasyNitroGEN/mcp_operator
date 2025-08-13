@@ -39,18 +39,20 @@ spec:
   {{- end }}
   {{- with .Values.registry.auth }}
   auth:
-    {{- with .secretName }}
+    {{- if .secretName }}
     secretRef:
-      name: {{ . | quote }}
-      {{- with $.Values.registry.auth.secretKey }}
+      name: {{ .secretName | quote }}
+      {{- with .secretKey }}
       key: {{ . | quote }}
       {{- end }}
-      {{- with $.Values.registry.auth.optional }}
+      {{- with .envVar }}
+      envVar: {{ . | quote }}
+      {{- end }}
+      {{- with .optional }}
       optional: {{ . }}
       {{- end }}
-    {{- end }}
-    {{- with .token }}
-    token: {{ . | quote }}
+    {{- else if .token }}
+    token: {{ .token | quote }}
     {{- end }}
   {{- end }}
 {{- end }}

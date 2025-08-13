@@ -43,7 +43,10 @@ registry:
     secretName: "mcp-gh-token"
     
     # Secret key within the secret (optional, defaults to token)
-    secretKey: ""
+    secretKey: "token"
+    
+    # Environment variable name for the secret value
+    envVar: "GITHUB_TOKEN"
     
     # Whether the secret is optional (defaults to false)
     optional: false

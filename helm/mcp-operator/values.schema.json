@@ -81,6 +81,10 @@
               "type": "string",
               "description": "Secret key within the secret (optional, defaults to token)"
             },
+            "envVar": {
+              "type": "string",
+              "description": "Environment variable name for the secret value"
+            },
             "optional": {
               "type": "boolean",
               "description": "Whether the secret is optional (defaults to false)"
