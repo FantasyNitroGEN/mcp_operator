@@ -76,6 +76,18 @@
             "secretName": {
               "type": "string",
               "description": "Secret name containing authentication credentials"
+            },
+            "secretKey": {
+              "type": "string",
+              "description": "Secret key within the secret (optional, defaults to token)"
+            },
+            "optional": {
+              "type": "boolean",
+              "description": "Whether the secret is optional (defaults to false)"
+            },
+            "token": {
+              "type": "string",
+              "description": "Direct token value (alternative to secretName, not recommended for production)"
             }
           },
           "additionalProperties": false
