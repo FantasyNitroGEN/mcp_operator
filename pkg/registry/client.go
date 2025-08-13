@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -34,6 +35,11 @@ type Client struct {
 	userAgent     string
 	githubToken   string
 	githubRetrier *retry.GitHubRetrier
+	// Repository information for proper URL construction
+	repoOwner  string
+	repoName   string
+	repoBranch string
+	repoPath   string
 }
 
 // NewClient создает новый клиент для работы с реестром
@@ -82,37 +88,6 @@ func NewClientWithRetryConfig(retryConfig retry.GitHubRetryConfig) *Client {
 		githubToken:   os.Getenv("GITHUB_TOKEN"),
 		githubRetrier: retry.NewGitHubRetrier(retryConfig),
 	}
-}
-
-// joinPathEsc безопасно склеивает сегменты пути и экранирует ТОЛЬКО сегменты, а не слеши.
-func joinPathEsc(parts ...string) string {
-	var allSegs []string
-	for _, p := range parts {
-		p = strings.Trim(p, "/")
-		if p == "" {
-			continue
-		}
-		// Split each part by '/' to get individual segments
-		segments := strings.Split(p, "/")
-		for _, seg := range segments {
-			if seg != "" {
-				allSegs = append(allSegs, url.PathEscape(seg))
-			}
-		}
-	}
-	return strings.Join(allSegs, "/")
-}
-
-// ghContentsURL собирает правильный URL для GitHub Contents API.
-func ghContentsURL(repo, p, ref string) string {
-	base := "https://api.github.com/repos/" + repo + "/contents"
-	if s := joinPathEsc(p); s != "" {
-		base += "/" + s
-	}
-	if ref != "" {
-		base += "?ref=" + url.QueryEscape(ref)
-	}
-	return base
 }
 
 // ListServers получает список всех MCP серверов из реестра
@@ -322,7 +297,13 @@ func (c *Client) listServersWithRateLimit(ctx context.Context, rateLimitInfo **R
 	var servers []MCPServerInfo
 
 	err := c.githubRetrier.DoWithGitHubRetry(ctx, "list_servers", func(ctx context.Context) (*http.Response, error) {
-		req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL, nil)
+		// Construct URL with proper query parameters
+		listURL := c.baseURL
+		if c.repoBranch != "" {
+			listURL += "?ref=" + url.QueryEscape(c.repoBranch)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", listURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
@@ -340,7 +321,7 @@ func (c *Client) listServersWithRateLimit(ctx context.Context, rateLimitInfo **R
 		}
 
 		// Log full URL and HTTP status code for debugging
-		fmt.Printf("registry list: url=%s status=%d\n", c.baseURL, resp.StatusCode)
+		fmt.Printf("registry list: url=%s status=%d\n", listURL, resp.StatusCode)
 
 		// Extract rate limit information
 		if *rateLimitInfo == nil {
@@ -394,7 +375,16 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 	var spec *MCPServerSpec
 
 	err := c.githubRetrier.DoWithGitHubRetry(ctx, "get_server_spec", func(ctx context.Context) (*http.Response, error) {
-		specURL := fmt.Sprintf("%s/%s/server.yaml", c.baseURL, url.PathEscape(serverName))
+		// ✅ формируем URL С НУЛЯ: сначала путь, потом ?ref=...
+		basePath := strings.Trim(c.repoPath, "/")
+		if basePath == "" {
+			basePath = "servers"
+		}
+		rel := path.Join(basePath, serverName, "server.yaml") // POSIX join, без экранирования '/'
+		specURL := "https://api.github.com/repos/" + c.repoOwner + "/" + c.repoName + "/contents/" + rel
+		if c.repoBranch != "" {
+			specURL += "?ref=" + url.QueryEscape(c.repoBranch)
+		}
 
 		req, err := http.NewRequestWithContext(ctx, "GET", specURL, nil)
 		if err != nil {
@@ -402,6 +392,7 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 		}
 
 		req.Header.Set("User-Agent", c.userAgent)
+		// хотим сырой YAML, а не JSON-обёртку
 		req.Header.Set("Accept", "application/vnd.github.raw")
 
 		if c.githubToken != "" {
@@ -601,6 +592,11 @@ func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*S
 		userAgent:     c.userAgent,
 		githubRetrier: c.githubRetrier,
 		githubToken:   repo.AuthToken,
+		// Store repository info for proper URL construction
+		repoOwner:  repo.Owner,
+		repoName:   repo.Name,
+		repoBranch: repo.Branch,
+		repoPath:   repo.Path,
 	}
 
 	// Нормализуем базовый путь к реестру
@@ -608,14 +604,16 @@ func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*S
 	if basePath == "" {
 		basePath = "servers"
 	}
+	repoClient.repoPath = basePath
 
 	branch := repo.Branch
 	if branch == "" {
 		branch = "main"
 	}
+	repoClient.repoBranch = branch
 
-	// Используем новую функцию ghContentsURL с правильным экранированием
-	repoClient.baseURL = ghContentsURL(fmt.Sprintf("%s/%s", repo.Owner, repo.Name), basePath, branch)
+	// Set baseURL WITHOUT query parameters for listing servers
+	repoClient.baseURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", repo.Owner, repo.Name, basePath)
 
 	// Получаем список серверов и rate limit info
 	var rateLimitInfo *RateLimitInfo
