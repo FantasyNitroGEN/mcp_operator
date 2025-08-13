@@ -63,7 +63,7 @@ spec:
                         description: EnvVar имя переменной окружения
                         type: string
                       key:
-                        description: Key ключ в секрете (если не указан, пробуются "token" и "GITHUB_TOKEN")
+                        description: Key ключ в секрете
                         type: string
                       name:
                         description: Name имя секрета
@@ -72,6 +72,8 @@ spec:
                         description: Optional указывает, что секрет может отсутствовать
                         type: boolean
                     required:
+                    - envVar
+                    - key
                     - name
                     type: object
                   token:
