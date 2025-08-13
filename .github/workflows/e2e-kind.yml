@@ -109,16 +109,21 @@ jobs:
             helm upgrade --install mcp-operator ./helm/mcp-operator \
               --namespace mcp --create-namespace \
               --set registry.enabled=true \
-              --set registry.url="https://api.github.com/repos/docker/mcp-registry/contents/servers?ref=main" \
-              --set registry.auth.secretName=mcp-gh-token
+              --set registry.auth.secretName=mcp-gh-token \
+              --set registry.source.type=github \
+              --set registry.source.repo=docker/mcp-registry \
+              --set registry.source.branch=main \
+              --set registry.source.path=servers
           else
             helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
             helm repo update
-            helm upgrade --install mcp-operator mcp-operator/mcp-operator \
               --namespace mcp --create-namespace \
               --set registry.enabled=true \
-              --set registry.url="https://api.github.com/repos/docker/mcp-registry/contents/servers?ref=main" \
-              --set registry.auth.secretName=mcp-gh-token
+              --set registry.auth.secretName=mcp-gh-token \
+              --set registry.source.type=github \
+              --set registry.source.repo=docker/mcp-registry \
+              --set registry.source.branch=main \
+              --set registry.source.path=servers
           fi
 
           # 2) принудительно ставим образ ghcr latest (без условий)
