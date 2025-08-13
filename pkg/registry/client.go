@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -392,7 +393,7 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 		}
 
 		req.Header.Set("User-Agent", c.userAgent)
-		// хотим сырой YAML, а не JSON-обёртку
+		// предпочитаем сырой YAML; если GitHub вернёт JSON — Patch 1 обработает
 		req.Header.Set("Accept", "application/vnd.github.raw")
 
 		if c.githubToken != "" {
@@ -404,8 +405,9 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 			return resp, fmt.Errorf("failed to execute request: %w", err)
 		}
 
-		// Log full URL and HTTP status code for debugging
-		fmt.Printf("fetch server.yaml: url=%s status=%d dir=%s\n", specURL, resp.StatusCode, serverName)
+		// Log full URL, HTTP status code and Content-Type for debugging
+		fmt.Printf("fetch server.yaml: url=%s status=%d dir=%s content-type=%s\n",
+			specURL, resp.StatusCode, serverName, resp.Header.Get("Content-Type"))
 
 		// Update rate limit information with most recent data
 		*rateLimitInfo = c.extractRateLimitInfo(resp)
@@ -422,20 +424,48 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 			return resp, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
 		}
 
-		var fileResponse RegistryResponse
-		if err := json.NewDecoder(resp.Body).Decode(&fileResponse); err != nil {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
-			}
-			return resp, fmt.Errorf("failed to decode response: %w", err)
-		}
-
-		content, err := base64.StdEncoding.DecodeString(fileResponse.Content)
+		// ── NEW: читаем тело и ветвимся по Content-Type (raw vs json)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			if closeErr := resp.Body.Close(); closeErr != nil {
 				fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
 			}
-			return resp, fmt.Errorf("failed to decode file content: %w", err)
+			return resp, fmt.Errorf("read body failed: %w", err)
+		}
+		ctype := strings.ToLower(resp.Header.Get("Content-Type"))
+		var content []byte
+		if strings.Contains(ctype, "application/json") {
+			// JSON ответ от Contents API (base64 в поле content)
+			var j struct {
+				Content  string `json:"content"`
+				Encoding string `json:"encoding"`
+			}
+			if err := json.Unmarshal(body, &j); err != nil {
+				if closeErr := resp.Body.Close(); closeErr != nil {
+					fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+				}
+				// For status=200, classify decode errors as non-retryable parse errors
+				if resp.StatusCode == http.StatusOK {
+					return resp, fmt.Errorf("json decode failed (non-retryable parse error for status=200): %w", err)
+				}
+				return resp, fmt.Errorf("json decode failed (expected raw or json): %w", err)
+			}
+			s := strings.ReplaceAll(j.Content, "\n", "")
+			if strings.EqualFold(j.Encoding, "base64") {
+				b, err := base64.StdEncoding.DecodeString(s)
+				if err != nil {
+					if closeErr := resp.Body.Close(); closeErr != nil {
+						fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
+					}
+					return resp, fmt.Errorf("base64 decode failed: %w", err)
+				}
+				content = b
+			} else {
+				content = []byte(j.Content)
+			}
+		} else {
+			// RAW: это и есть YAML
+			content = body
 		}
 
 		hash := sha256.Sum256(content)
