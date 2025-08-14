@@ -181,8 +181,8 @@ func (v *DefaultValidationService) ValidateRegistry(ctx context.Context, registr
 }
 
 // validateRegistryInfo validates registry information in MCPServer
-func (v *DefaultValidationService) validateRegistryInfo(registry mcpv1.MCPRegistryInfo) error {
-	if registry.Name == "" {
+func (v *DefaultValidationService) validateRegistryInfo(registry *mcpv1.RegistryRef) error {
+	if registry == nil || registry.Name == "" {
 		return fmt.Errorf("registry name is required")
 	}
 
@@ -194,8 +194,8 @@ func (v *DefaultValidationService) validateRegistryInfo(registry mcpv1.MCPRegist
 }
 
 // validateRuntimeSpec validates runtime specification
-func (v *DefaultValidationService) validateRuntimeSpec(runtime mcpv1.MCPRuntimeSpec) error {
-	if runtime.Type == "" {
+func (v *DefaultValidationService) validateRuntimeSpec(runtime *mcpv1.RuntimeSpec) error {
+	if runtime == nil || runtime.Type == "" {
 		return fmt.Errorf("runtime type is required")
 	}
 

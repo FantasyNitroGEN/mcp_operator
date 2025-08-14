@@ -286,7 +286,7 @@ func (s *DefaultAutoUpdateService) IsUpdateRequired(ctx context.Context, mcpServ
 	}
 
 	// Compare other critical fields that might affect deployment
-	if !s.areRuntimeSpecsEqual(&mcpServer.Spec.Runtime, latestSpec.Runtime) {
+	if !s.areRuntimeSpecsEqual(mcpServer.Spec.Runtime, latestSpec.Runtime) {
 		logger.Info("Runtime specification mismatch detected")
 		return true, latestSpec, nil
 	}
@@ -368,8 +368,8 @@ func (s *DefaultAutoUpdateService) applyTemplateUpdates(mcpServer *mcpv1.MCPServ
 	}
 }
 
-// areRuntimeSpecsEqual compares mcpv1.MCPRuntimeSpec with registry.RuntimeSpec
-func (s *DefaultAutoUpdateService) areRuntimeSpecsEqual(current *mcpv1.MCPRuntimeSpec, latest registry.RuntimeSpec) bool {
+// areRuntimeSpecsEqual compares mcpv1.RuntimeSpec with registry.RuntimeSpec
+func (s *DefaultAutoUpdateService) areRuntimeSpecsEqual(current *mcpv1.RuntimeSpec, latest registry.RuntimeSpec) bool {
 	// Compare type
 	if current.Type != latest.Type {
 		return false

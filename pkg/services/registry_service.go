@@ -393,12 +393,6 @@ func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, m
 		return fmt.Errorf("server name is required for cache enrichment")
 	}
 
-	// Skip if already enriched
-	if mcpServer.Spec.Registry.Version != "" && mcpServer.Spec.Runtime.Image != "" {
-		logger.Info("MCPServer already enriched with registry data")
-		return nil
-	}
-
 	// Find ConfigMap mcpregistry-<registryName>-<serverName>
 	configMapName := fmt.Sprintf("mcpregistry-%s-%s", mcpServer.Spec.Registry.RegistryName, mcpServer.Spec.Registry.ServerName)
 	configMap := &corev1.ConfigMap{}
@@ -432,6 +426,11 @@ func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, m
 		return fmt.Errorf("failed to parse server.yaml from ConfigMap %s: %w", configMapName, err)
 	}
 
+	// Initialize Runtime if nil
+	if mcpServer.Spec.Runtime == nil {
+		mcpServer.Spec.Runtime = &mcpv1.RuntimeSpec{}
+	}
+
 	// Enrich registry information (without overwriting user-specified values)
 	if mcpServer.Spec.Registry.Version == "" {
 		mcpServer.Spec.Registry.Version = spec.Version
@@ -456,10 +455,12 @@ func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, m
 	}
 
 	// Enrich runtime information (without overwriting user-specified values)
-	if mcpServer.Spec.Runtime.Type == "" {
+	if mcpServer.Spec.Runtime.Type == "" && spec.Runtime.Type != "" {
 		mcpServer.Spec.Runtime.Type = spec.Runtime.Type
 	}
-	if mcpServer.Spec.Runtime.Image == "" {
+	// For docker runtime, ensure image is populated from registry cache when not specified by user
+	if (mcpServer.Spec.Runtime.Type == "docker" || mcpServer.Spec.Runtime.Type == "Docker") &&
+		mcpServer.Spec.Runtime.Image == "" && spec.Runtime.Image != "" {
 		mcpServer.Spec.Runtime.Image = spec.Runtime.Image
 	}
 	if len(mcpServer.Spec.Runtime.Command) == 0 {

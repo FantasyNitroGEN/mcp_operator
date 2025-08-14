@@ -799,13 +799,58 @@ type IstioRetryPolicy struct {
 	RetryOn string `json:"retryOn,omitempty"`
 }
 
+type RegistryRef struct {
+	// RegistryName название MCPRegistry в том же namespace
+	RegistryName string `json:"registryName"`
+
+	// ServerName имя сервера в реестре
+	ServerName string `json:"serverName"`
+
+	// Имя сервера в MCP Registry (например, "postgres")
+	Name string `json:"name"`
+
+	// Version версия сервера
+	Version string `json:"version,omitempty"`
+
+	// Description описание сервера
+	Description string `json:"description,omitempty"`
+
+	// Repository URL репозитория
+	Repository string `json:"repository,omitempty"`
+
+	// License лицензия сервера
+	License string `json:"license,omitempty"`
+
+	// Author автор сервера
+	Author string `json:"author,omitempty"`
+
+	// Keywords ключевые слова
+	Keywords []string `json:"keywords,omitempty"`
+
+	// Capabilities возможности сервера
+	Capabilities []string `json:"capabilities,omitempty"`
+}
+
+type RuntimeSpec struct {
+	Type    string   `json:"type,omitempty"`  // docker|stdio
+	Image   string   `json:"image,omitempty"` // требуется при docker
+	Command []string `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+
+	// Env переменные окружения для runtime
+	Env map[string]string `json:"env,omitempty"`
+
+	// Port порт для подключения к MCP серверу
+	Port int32 `json:"port,omitempty"`
+}
+
 // MCPServerSpec определяет желаемое состояние MCPServer
 type MCPServerSpec struct {
 	// Registry содержит информацию о сервере из MCP Registry
-	Registry MCPRegistryInfo `json:"registry"`
+	Registry *RegistryRef `json:"registry,omitempty"`
 
 	// Runtime определяет среду выполнения сервера
-	Runtime MCPRuntimeSpec `json:"runtime"`
+	Runtime *RuntimeSpec `json:"runtime,omitempty"`
 
 	// Config содержит конфигурацию сервера
 	Config *runtime.RawExtension `json:"config,omitempty"`
@@ -816,8 +861,11 @@ type MCPServerSpec struct {
 	// Resources определяет требования к ресурсам
 	Resources ResourceRequirements `json:"resources,omitempty"`
 
-	// Environment содержит переменные окружения
+	// Deprecated: use Env
 	Environment map[string]string `json:"environment,omitempty"`
+
+	// Env содержит переменные окружения
+	Env []corev1.EnvVar `json:"env,omitempty"`
 
 	// ServiceAccount для запуска подов
 	ServiceAccount string `json:"serviceAccount,omitempty"`
