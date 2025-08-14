@@ -256,6 +256,18 @@ jobs:
             --replicas 1 \
             --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}'
 
+      - name: Patch MCPServer image for docker runtime
+        run: |
+          set -e
+          kubectl -n mcp patch mcpserver postgres --type merge -p '{
+            "spec":{
+              "runtime":{
+                "type":"docker",
+                "image":"mcp/postgres"
+              }
+            }
+          }'
+
       - name: Patch MCPServer registry name (fix Rendered/Applied=Unknown)
         run: |
           set -e
