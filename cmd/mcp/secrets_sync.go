@@ -107,7 +107,11 @@ func parseEnvFiles(filePaths []string, prefix string) (map[string][]byte, error)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open file %s: %w", filePath, err)
 		}
-		defer func() { _ = file.Close() }()
+		defer func() {
+			if err := file.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to close file %s: %v\n", filePath, err)
+			}
+		}()
 
 		scanner := bufio.NewScanner(file)
 		lineNum := 0

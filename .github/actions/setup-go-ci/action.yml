@@ -18,6 +18,7 @@ runs:
     - if: ${{ inputs.run-vet == 'true' }}
       shell: bash
       run: |
+        go mod tidy
         go mod download
         go mod verify
         go vet ./...
