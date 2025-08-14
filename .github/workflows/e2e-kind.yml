@@ -254,27 +254,11 @@ jobs:
             --kubeconfig "$KUBECONFIG" \
             --namespace mcp \
             --replicas 1 \
+            --runtime docker \
+            --transport stdio \
             --image mcp/postgres \
-            --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}'
-
-      - name: Patch MCPServer image for docker runtime
-        run: |
-          set -e
-          kubectl -n mcp patch mcpserver postgres --type merge -p '{
-            "spec":{
-              "runtime":{
-                "type":"docker",
-                "image":"mcp/postgres"
-              }
-            }
-          }'
-
-      - name: Patch MCPServer registry name (fix Rendered/Applied=Unknown)
-        run: |
-          set -e
-          kubectl -n mcp patch mcpserver postgres --type merge -p '{"spec":{"registry":{"name":"default-registry"}}}'
-          # опционально: показать, что применилось
-          kubectl -n mcp get mcpserver postgres -o jsonpath='{.spec.registry.name}{"\n"}'
+            --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}' \
+            --wait --timeout 300s
 
       - name: Validate status
         run: |
