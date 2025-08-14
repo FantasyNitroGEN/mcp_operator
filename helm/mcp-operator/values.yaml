@@ -231,6 +231,17 @@ webhook:
   # Timeout in seconds
   timeoutSeconds: 10
 
+# Istio integration configuration
+istio:
+  # Enable Istio integration for the operator
+  # When enabled, the operator can create VirtualService and DestinationRule resources
+  # This requires Istio CRDs to be installed in the cluster
+  enabled: true
+  
+  # Auto-detect Istio availability
+  # When enabled, the operator will check for Istio CRDs before creating Istio resources
+  autoDetect: true
+
 # Backup configuration
 backup:
   # Enable backup functionality

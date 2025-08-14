@@ -115,37 +115,39 @@ func (v *MCPServerValidator) validateImageSecurity(mcpServer *mcpv1.MCPServer) f
 	var allErrs field.ErrorList
 	specPath := field.NewPath("spec")
 
-	// Check if image is from trusted registry
-	image := mcpServer.Spec.Runtime.Image
-	if image == "" {
-		allErrs = append(allErrs, field.Required(specPath.Child("runtime", "image"), "image is required"))
-		return allErrs
-	}
-
-	// Validate image registry
-	isTrusted := false
-	for _, registry := range trustedRegistries {
-		if strings.HasPrefix(image, registry) {
-			isTrusted = true
-			break
+	// Only require image for docker runtime type
+	if mcpServer.Spec.Runtime != nil && mcpServer.Spec.Runtime.Type == "docker" {
+		image := mcpServer.Spec.Runtime.Image
+		if image == "" {
+			allErrs = append(allErrs, field.Required(specPath.Child("runtime", "image"), "image is required for docker runtime"))
+			return allErrs
 		}
-	}
 
-	if !isTrusted {
-		allErrs = append(allErrs, field.Invalid(
-			specPath.Child("runtime", "image"),
-			image,
-			fmt.Sprintf("image must be from trusted registry: %v", trustedRegistries),
-		))
-	}
+		// Validate image registry for docker runtime
+		isTrusted := false
+		for _, registry := range trustedRegistries {
+			if strings.HasPrefix(image, registry) {
+				isTrusted = true
+				break
+			}
+		}
 
-	// Validate image tag (no latest in production)
-	if strings.HasSuffix(image, ":latest") {
-		allErrs = append(allErrs, field.Invalid(
-			specPath.Child("runtime", "image"),
-			image,
-			"using 'latest' tag is not recommended for production",
-		))
+		if !isTrusted {
+			allErrs = append(allErrs, field.Invalid(
+				specPath.Child("runtime", "image"),
+				image,
+				fmt.Sprintf("image must be from trusted registry: %v", trustedRegistries),
+			))
+		}
+
+		// Validate image tag (no latest in production)
+		if strings.HasSuffix(image, ":latest") {
+			allErrs = append(allErrs, field.Invalid(
+				specPath.Child("runtime", "image"),
+				image,
+				"using 'latest' tag is not recommended for production",
+			))
+		}
 	}
 
 	return allErrs
@@ -285,6 +287,41 @@ func (v *MCPServerValidator) validateTenantConfiguration(mcpServer *mcpv1.MCPSer
 }
 
 func (d *MCPServerDefaulter) setDefaults(mcpServer *mcpv1.MCPServer) {
+	// Default registry.name to metadata.name if empty
+	if mcpServer.Spec.Registry != nil && mcpServer.Spec.Registry.Name == "" {
+		mcpServer.Spec.Registry.Name = mcpServer.Name
+	}
+
+	// Convert old spec.port to spec.ports if spec.ports is empty
+	if mcpServer.Spec.Port != nil && len(mcpServer.Spec.Ports) == 0 {
+		mcpServer.Spec.Ports = []mcpv1.PortSpec{
+			{
+				Name:       "http",
+				Port:       *mcpServer.Spec.Port,
+				TargetPort: *mcpServer.Spec.Port,
+				Protocol:   "TCP",
+			},
+		}
+	}
+
+	// Set defaults for each port in spec.ports
+	for i := range mcpServer.Spec.Ports {
+		port := &mcpServer.Spec.Ports[i]
+		// If targetPort is empty, set it to port
+		if port.TargetPort == 0 {
+			port.TargetPort = port.Port
+		}
+		// If protocol is empty, set it to TCP
+		if port.Protocol == "" {
+			port.Protocol = "TCP"
+		}
+	}
+
+	// Set default transport path "/mcp" when type is specified but path is empty
+	if mcpServer.Spec.Transport != nil && mcpServer.Spec.Transport.Type != "" && mcpServer.Spec.Transport.Path == "" {
+		mcpServer.Spec.Transport.Path = "/mcp"
+	}
+
 	// Set default replicas
 	if mcpServer.Spec.Replicas == nil {
 		replicas := int32(1)
@@ -292,7 +329,7 @@ func (d *MCPServerDefaulter) setDefaults(mcpServer *mcpv1.MCPServer) {
 	}
 
 	// Set default port
-	if mcpServer.Spec.Runtime.Port == 0 {
+	if mcpServer.Spec.Runtime != nil && mcpServer.Spec.Runtime.Port == 0 {
 		mcpServer.Spec.Runtime.Port = 8080
 	}
 

@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -88,10 +89,59 @@ func (r *DefaultResourceBuilderService) BuildService(mcpServer *mcpv1.MCPServer)
 	labels := r.buildLabels(mcpServer)
 	selector := r.buildSelector(mcpServer)
 
-	// Default port
-	port := int32(8080)
-	if mcpServer.Spec.Runtime.Port > 0 {
-		port = mcpServer.Spec.Runtime.Port
+	// Collect service ports based on gateway configuration
+	var servicePorts []corev1.ServicePort
+
+	if mcpServer.Spec.Gateway != nil && mcpServer.Spec.Gateway.Enabled {
+		// If gateway is enabled, publish only the gateway port
+		gatewayPort := mcpServer.Spec.Gateway.Port
+		if gatewayPort == 0 {
+			gatewayPort = 8080 // Default gateway port
+		}
+		servicePorts = []corev1.ServicePort{
+			{
+				Name:       "gateway",
+				Port:       gatewayPort,
+				TargetPort: intstr.FromInt32(gatewayPort),
+				Protocol:   corev1.ProtocolTCP,
+			},
+		}
+		logger.V(1).Info("Service configured for gateway", "gatewayPort", gatewayPort)
+	} else {
+		// Publish all ports from spec.ports[]
+		containerPorts := r.collectContainerPorts(mcpServer)
+		servicePorts = make([]corev1.ServicePort, len(containerPorts))
+
+		for i, containerPort := range containerPorts {
+			targetPort := containerPort.ContainerPort
+
+			protocol := corev1.ProtocolTCP
+			if containerPort.Protocol != "" {
+				protocol = containerPort.Protocol
+			}
+
+			servicePorts[i] = corev1.ServicePort{
+				Name:       containerPort.Name,
+				Port:       containerPort.ContainerPort,
+				TargetPort: intstr.FromInt32(targetPort),
+				Protocol:   protocol,
+			}
+		}
+		logger.V(1).Info("Service configured for all container ports", "portsCount", len(servicePorts))
+	}
+
+	// Fallback: if no ports configured, use default
+	if len(servicePorts) == 0 {
+		defaultPort := int32(8080)
+		servicePorts = []corev1.ServicePort{
+			{
+				Name:       "mcp",
+				Port:       defaultPort,
+				TargetPort: intstr.FromInt32(defaultPort),
+				Protocol:   corev1.ProtocolTCP,
+			},
+		}
+		logger.V(1).Info("Using fallback default port", "port", defaultPort)
 	}
 
 	// Service type
@@ -109,18 +159,11 @@ func (r *DefaultResourceBuilderService) BuildService(mcpServer *mcpv1.MCPServer)
 		Spec: corev1.ServiceSpec{
 			Type:     serviceType,
 			Selector: selector,
-			Ports: []corev1.ServicePort{
-				{
-					Name:       "mcp",
-					Port:       port,
-					TargetPort: intstr.FromInt(int(port)),
-					Protocol:   corev1.ProtocolTCP,
-				},
-			},
+			Ports:    servicePorts,
 		},
 	}
 
-	logger.V(1).Info("Service built successfully", "port", port, "type", serviceType)
+	logger.V(1).Info("Service built successfully", "portsCount", len(servicePorts), "type", serviceType)
 	return service
 }
 
@@ -435,19 +478,10 @@ func (r *DefaultResourceBuilderService) buildPodTemplate(mcpServer *mcpv1.MCPSer
 	// Build annotations for pod template
 	annotations := make(map[string]string)
 
-	// Add Istio sidecar injection annotation if enabled
-	if mcpServer.Spec.Istio != nil && mcpServer.Spec.Istio.Enabled {
-		// Check if sidecar injection is explicitly configured
-		if mcpServer.Spec.Istio.SidecarInject != nil {
-			if *mcpServer.Spec.Istio.SidecarInject {
-				annotations["sidecar.istio.io/inject"] = "true"
-			} else {
-				annotations["sidecar.istio.io/inject"] = "false"
-			}
-		} else {
-			// Default to true if Istio is enabled but sidecar injection is not explicitly set
-			annotations["sidecar.istio.io/inject"] = "true"
-		}
+	// Add Istio sidecar injection annotation if enabled via gateway.istio
+	if mcpServer.Spec.Gateway != nil && mcpServer.Spec.Gateway.Istio != nil && mcpServer.Spec.Gateway.Istio.Enabled {
+		// Default to true for sidecar injection when Istio is enabled
+		annotations["sidecar.istio.io/inject"] = "true"
 	}
 
 	return corev1.PodTemplateSpec{
@@ -459,25 +493,80 @@ func (r *DefaultResourceBuilderService) buildPodTemplate(mcpServer *mcpv1.MCPSer
 	}
 }
 
+// collectContainerPorts collects all container ports from spec.ports[], legacy spec.port, and runtime.port
+func (r *DefaultResourceBuilderService) collectContainerPorts(mcpServer *mcpv1.MCPServer) []corev1.ContainerPort {
+	var containerPorts []corev1.ContainerPort
+
+	// First priority: use spec.ports[] if provided
+	if len(mcpServer.Spec.Ports) > 0 {
+		for _, portSpec := range mcpServer.Spec.Ports {
+			targetPort := portSpec.Port
+			if portSpec.TargetPort > 0 {
+				targetPort = portSpec.TargetPort
+			}
+
+			protocol := corev1.ProtocolTCP
+			if portSpec.Protocol != "" {
+				if portSpec.Protocol == "UDP" {
+					protocol = corev1.ProtocolUDP
+				}
+			}
+
+			containerPorts = append(containerPorts, corev1.ContainerPort{
+				Name:          portSpec.Name,
+				ContainerPort: targetPort,
+				Protocol:      protocol,
+			})
+		}
+		return containerPorts
+	}
+
+	// Second priority: convert legacy spec.port if provided
+	if mcpServer.Spec.Port != nil && *mcpServer.Spec.Port > 0 {
+		containerPorts = append(containerPorts, corev1.ContainerPort{
+			Name:          "mcp",
+			ContainerPort: *mcpServer.Spec.Port,
+			Protocol:      corev1.ProtocolTCP,
+		})
+		return containerPorts
+	}
+
+	// Third priority: use runtime.port if provided
+	if mcpServer.Spec.Runtime != nil && mcpServer.Spec.Runtime.Port > 0 {
+		containerPorts = append(containerPorts, corev1.ContainerPort{
+			Name:          "mcp",
+			ContainerPort: mcpServer.Spec.Runtime.Port,
+			Protocol:      corev1.ProtocolTCP,
+		})
+		return containerPorts
+	}
+
+	// Fallback: use default port 8080
+	containerPorts = append(containerPorts, corev1.ContainerPort{
+		Name:          "mcp",
+		ContainerPort: 8080,
+		Protocol:      corev1.ProtocolTCP,
+	})
+
+	return containerPorts
+}
+
 // buildContainer builds the main container for the pod
 func (r *DefaultResourceBuilderService) buildContainer(mcpServer *mcpv1.MCPServer) corev1.Container {
-	// Default port
-	port := int32(8080)
-	if mcpServer.Spec.Runtime.Port > 0 {
-		port = mcpServer.Spec.Runtime.Port
+	// Check if gateway is enabled with stdio transport - use gateway container
+	if mcpServer.Spec.Gateway != nil && mcpServer.Spec.Gateway.Enabled &&
+		mcpServer.Spec.Transport != nil && mcpServer.Spec.Transport.Type == "stdio" {
+		return r.buildGatewayContainer(mcpServer)
 	}
+
+	// Collect container ports dynamically
+	containerPorts := r.collectContainerPorts(mcpServer)
 
 	container := corev1.Container{
 		Name:  "mcp-server",
 		Image: mcpServer.Spec.Runtime.Image,
-		Ports: []corev1.ContainerPort{
-			{
-				Name:          "mcp",
-				ContainerPort: port,
-				Protocol:      corev1.ProtocolTCP,
-			},
-		},
-		Env: r.buildEnvironmentVariables(mcpServer),
+		Ports: containerPorts,
+		Env:   r.buildEnvironmentVariables(mcpServer, containerPorts),
 	}
 
 	// Add command and args
@@ -503,12 +592,117 @@ func (r *DefaultResourceBuilderService) buildContainer(mcpServer *mcpv1.MCPServe
 		container.SecurityContext = mcpServer.Spec.SecurityContext
 	}
 
-	// Add health checks (liveness and readiness probes)
+	// Add health checks (TCP probes on first container port)
+	if len(containerPorts) > 0 {
+		firstPort := containerPorts[0].ContainerPort
+
+		container.LivenessProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{
+					Port: intstr.FromInt32(firstPort),
+				},
+			},
+			InitialDelaySeconds: 30,
+			PeriodSeconds:       10,
+			TimeoutSeconds:      5,
+			FailureThreshold:    3,
+			SuccessThreshold:    1,
+		}
+
+		container.ReadinessProbe = &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{
+					Port: intstr.FromInt32(firstPort),
+				},
+			},
+			InitialDelaySeconds: 5,
+			PeriodSeconds:       5,
+			TimeoutSeconds:      3,
+			FailureThreshold:    3,
+			SuccessThreshold:    1,
+		}
+	}
+
+	return container
+}
+
+// buildGatewayContainer builds a gateway container that runs STDIO server as subprocess
+func (r *DefaultResourceBuilderService) buildGatewayContainer(mcpServer *mcpv1.MCPServer) corev1.Container {
+	gateway := mcpServer.Spec.Gateway
+	runtime := mcpServer.Spec.Runtime
+
+	// Default gateway port if not specified
+	gatewayPort := gateway.Port
+	if gatewayPort == 0 {
+		gatewayPort = 8000
+	}
+
+	// Build gateway container ports
+	containerPorts := []corev1.ContainerPort{
+		{
+			Name:          "gateway",
+			ContainerPort: gatewayPort,
+			Protocol:      corev1.ProtocolTCP,
+		},
+	}
+
+	// Build gateway args - replace <cmd> placeholder with runtime command
+	var gatewayArgs []string
+	if len(gateway.Args) > 0 {
+		gatewayArgs = make([]string, len(gateway.Args))
+		copy(gatewayArgs, gateway.Args)
+
+		// Replace <cmd> placeholder with runtime command
+		for i, arg := range gatewayArgs {
+			if arg == "<cmd>" {
+				// Build the subprocess command from runtime
+				subprocessCmd := ""
+				if len(runtime.Command) > 0 {
+					subprocessCmd = runtime.Command[0]
+					if len(runtime.Command) > 1 {
+						subprocessCmd += " " + strings.Join(runtime.Command[1:], " ")
+					}
+				}
+				if len(runtime.Args) > 0 {
+					if subprocessCmd != "" {
+						subprocessCmd += " " + strings.Join(runtime.Args, " ")
+					} else {
+						subprocessCmd = strings.Join(runtime.Args, " ")
+					}
+				}
+				gatewayArgs[i] = subprocessCmd
+			}
+		}
+	}
+
+	container := corev1.Container{
+		Name:  "gateway",
+		Image: gateway.Image,
+		Args:  gatewayArgs,
+		Ports: containerPorts,
+		Env:   r.buildGatewayEnvironmentVariables(mcpServer, runtime),
+	}
+
+	// Add resource requirements
+	if !r.isResourceRequirementsEmpty(mcpServer.Spec.Resources) {
+		container.Resources = r.buildResourceRequirements(mcpServer.Spec.Resources)
+	}
+
+	// Add volume mounts
+	if len(mcpServer.Spec.VolumeMounts) > 0 {
+		container.VolumeMounts = r.buildVolumeMounts(mcpServer.Spec.VolumeMounts)
+	}
+
+	// Add security context
+	if mcpServer.Spec.SecurityContext != nil {
+		container.SecurityContext = mcpServer.Spec.SecurityContext
+	}
+
+	// Add health checks (TCP probes on gateway port)
 	container.LivenessProbe = &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
-			HTTPGet: &corev1.HTTPGetAction{
-				Path: "/health",
-				Port: intstr.FromInt32(port),
+			TCPSocket: &corev1.TCPSocketAction{
+				Port: intstr.FromInt32(gatewayPort),
 			},
 		},
 		InitialDelaySeconds: 30,
@@ -520,9 +714,8 @@ func (r *DefaultResourceBuilderService) buildContainer(mcpServer *mcpv1.MCPServe
 
 	container.ReadinessProbe = &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
-			HTTPGet: &corev1.HTTPGetAction{
-				Path: "/ready",
-				Port: intstr.FromInt32(port),
+			TCPSocket: &corev1.TCPSocketAction{
+				Port: intstr.FromInt32(gatewayPort),
 			},
 		},
 		InitialDelaySeconds: 5,
@@ -535,8 +728,63 @@ func (r *DefaultResourceBuilderService) buildContainer(mcpServer *mcpv1.MCPServe
 	return container
 }
 
+// buildGatewayEnvironmentVariables builds environment variables for the gateway container
+func (r *DefaultResourceBuilderService) buildGatewayEnvironmentVariables(mcpServer *mcpv1.MCPServer, runtime *mcpv1.RuntimeSpec) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{}
+
+	// Add gateway environment variables
+	if mcpServer.Spec.Gateway != nil {
+		envVars = append(envVars, mcpServer.Spec.Gateway.Env...)
+	}
+
+	// Add runtime environment variables for the subprocess
+	if runtime != nil {
+		for k, v := range runtime.Env {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  k,
+				Value: v,
+			})
+		}
+	}
+
+	// Add general environment variables
+	envVars = append(envVars, mcpServer.Spec.Env...)
+
+	// Add standard MCP environment variables
+	envVars = append(envVars, []corev1.EnvVar{
+		{
+			Name: "MCP_SERVER_NAME",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			},
+		},
+		{
+			Name: "MCP_SERVER_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.namespace",
+				},
+			},
+		},
+	}...)
+
+	// Add gateway port
+	gatewayPort := mcpServer.Spec.Gateway.Port
+	if gatewayPort == 0 {
+		gatewayPort = 8000
+	}
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "GATEWAY_PORT",
+		Value: strconv.Itoa(int(gatewayPort)),
+	})
+
+	return envVars
+}
+
 // buildEnvironmentVariables builds environment variables for the container
-func (r *DefaultResourceBuilderService) buildEnvironmentVariables(mcpServer *mcpv1.MCPServer) []corev1.EnvVar {
+func (r *DefaultResourceBuilderService) buildEnvironmentVariables(mcpServer *mcpv1.MCPServer, containerPorts []corev1.ContainerPort) []corev1.EnvVar {
 	envVars := []corev1.EnvVar{}
 
 	// Add runtime environment variables
@@ -577,11 +825,21 @@ func (r *DefaultResourceBuilderService) buildEnvironmentVariables(mcpServer *mcp
 				},
 			},
 		},
-		{
-			Name:  "MCP_SERVER_PORT",
-			Value: strconv.Itoa(int(mcpServer.Spec.Runtime.Port)),
-		},
 	}...)
+
+	// Add MCP_SERVER_PORT using first container port
+	if len(containerPorts) > 0 {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "MCP_SERVER_PORT",
+			Value: strconv.Itoa(int(containerPorts[0].ContainerPort)),
+		})
+	} else {
+		// Fallback to default port if no container ports
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "MCP_SERVER_PORT",
+			Value: "8080",
+		})
+	}
 
 	return envVars
 }
@@ -1178,29 +1436,48 @@ func (r *DefaultResourceBuilderService) BuildVirtualService(mcpServer *mcpv1.MCP
 	logger := log.Log.WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
 	logger.V(1).Info("Building VirtualService")
 
-	// Check if Istio is enabled and VirtualService is configured
-	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.VirtualService == nil {
+	// Check if gateway.istio is enabled
+	if mcpServer.Spec.Gateway == nil || mcpServer.Spec.Gateway.Istio == nil || !mcpServer.Spec.Gateway.Istio.Enabled {
 		return nil
 	}
 
-	istioConfig := mcpServer.Spec.Istio
-	vsConfig := istioConfig.VirtualService
+	istioConfig := mcpServer.Spec.Gateway.Istio
 
-	// Set default path if not specified
-	path := vsConfig.Path
-	if path == "" {
-		path = "/"
+	// Host is required
+	if istioConfig.Host == "" {
+		logger.V(1).Info("Skipping VirtualService - host not specified")
+		return nil
+	}
+
+	// Set default path from transport.path or "/mcp"
+	path := "/mcp" // Default path
+	if mcpServer.Spec.Transport != nil && mcpServer.Spec.Transport.Path != "" {
+		path = mcpServer.Spec.Transport.Path
 	}
 
 	// Set default gateway if not specified
-	gateway := istioConfig.Gateway
+	gateway := istioConfig.GatewayRef
 	if gateway == "" {
 		gateway = "default"
 	}
 
+	// Determine destination port: gateway.port or first server port if gateway not enabled
+	var destinationPort int32
+	if mcpServer.Spec.Gateway != nil && mcpServer.Spec.Gateway.Enabled && mcpServer.Spec.Gateway.Port > 0 {
+		destinationPort = mcpServer.Spec.Gateway.Port
+	} else {
+		// Use first server port
+		containerPorts := r.collectContainerPorts(mcpServer)
+		if len(containerPorts) > 0 {
+			destinationPort = containerPorts[0].ContainerPort
+		} else {
+			destinationPort = 8080 // fallback
+		}
+	}
+
 	// Build VirtualService spec
 	spec := map[string]interface{}{
-		"hosts":    []string{vsConfig.Host},
+		"hosts":    []string{istioConfig.Host},
 		"gateways": []string{gateway},
 		"http": []map[string]interface{}{
 			{
@@ -1216,50 +1493,13 @@ func (r *DefaultResourceBuilderService) BuildVirtualService(mcpServer *mcpv1.MCP
 						"destination": map[string]interface{}{
 							"host": fmt.Sprintf("%s.%s.svc.cluster.local", mcpServer.Name, mcpServer.Namespace),
 							"port": map[string]interface{}{
-								"number": mcpServer.Spec.Runtime.Port,
+								"number": destinationPort,
 							},
 						},
 					},
 				},
 			},
 		},
-	}
-
-	// Add timeout if specified
-	if vsConfig.Timeout != "" {
-		httpRoute := spec["http"].([]map[string]interface{})[0]
-		httpRoute["timeout"] = vsConfig.Timeout
-	}
-
-	// Add retries if specified
-	if vsConfig.Retries != nil {
-		httpRoute := spec["http"].([]map[string]interface{})[0]
-		retries := map[string]interface{}{}
-
-		if vsConfig.Retries.Attempts > 0 {
-			retries["attempts"] = vsConfig.Retries.Attempts
-		}
-		if vsConfig.Retries.PerTryTimeout != "" {
-			retries["perTryTimeout"] = vsConfig.Retries.PerTryTimeout
-		}
-		if vsConfig.Retries.RetryOn != "" {
-			retries["retryOn"] = vsConfig.Retries.RetryOn
-		}
-
-		if len(retries) > 0 {
-			httpRoute["retries"] = retries
-		}
-	}
-
-	// Add headers if specified
-	if len(vsConfig.Headers) > 0 {
-		httpRoute := spec["http"].([]map[string]interface{})[0]
-		headers := map[string]interface{}{
-			"request": map[string]interface{}{
-				"set": vsConfig.Headers,
-			},
-		}
-		httpRoute["headers"] = headers
 	}
 
 	// Create VirtualService resource
@@ -1284,94 +1524,23 @@ func (r *DefaultResourceBuilderService) BuildDestinationRule(mcpServer *mcpv1.MC
 	logger := log.Log.WithValues("mcpserver", mcpServer.Name, "namespace", mcpServer.Namespace)
 	logger.V(1).Info("Building DestinationRule")
 
-	// Check if Istio is enabled and DestinationRule is configured
-	if mcpServer.Spec.Istio == nil || !mcpServer.Spec.Istio.Enabled || mcpServer.Spec.Istio.DestinationRule == nil {
+	// Check if gateway.istio is enabled - DestinationRule is optional
+	if mcpServer.Spec.Gateway == nil || mcpServer.Spec.Gateway.Istio == nil || !mcpServer.Spec.Gateway.Istio.Enabled {
 		return nil
 	}
 
-	istioConfig := mcpServer.Spec.Istio
-	drConfig := istioConfig.DestinationRule
-
-	// Build DestinationRule spec
+	// Build simple DestinationRule spec with basic subset (without mTLS for first release)
 	spec := map[string]interface{}{
 		"host": fmt.Sprintf("%s.%s.svc.cluster.local", mcpServer.Name, mcpServer.Namespace),
-	}
-
-	// Add traffic policy if specified
-	if drConfig.TrafficPolicy != nil {
-		trafficPolicy := map[string]interface{}{}
-
-		// Add TLS settings
-		if drConfig.TrafficPolicy.TLS != nil {
-			tls := map[string]interface{}{}
-			if drConfig.TrafficPolicy.TLS.Mode != "" {
-				tls["mode"] = drConfig.TrafficPolicy.TLS.Mode
-			} else {
-				tls["mode"] = "ISTIO_MUTUAL" // Default to mutual TLS
-			}
-			trafficPolicy["tls"] = tls
-		}
-
-		// Add connection pool settings
-		if drConfig.TrafficPolicy.ConnectionPool != nil {
-			connectionPool := map[string]interface{}{}
-
-			// Add TCP settings
-			if drConfig.TrafficPolicy.ConnectionPool.TCP != nil {
-				tcp := map[string]interface{}{}
-				if drConfig.TrafficPolicy.ConnectionPool.TCP.MaxConnections > 0 {
-					tcp["maxConnections"] = drConfig.TrafficPolicy.ConnectionPool.TCP.MaxConnections
-				}
-				if drConfig.TrafficPolicy.ConnectionPool.TCP.ConnectTimeout != "" {
-					tcp["connectTimeout"] = drConfig.TrafficPolicy.ConnectionPool.TCP.ConnectTimeout
-				}
-				if len(tcp) > 0 {
-					connectionPool["tcp"] = tcp
-				}
-			}
-
-			// Add HTTP settings
-			if drConfig.TrafficPolicy.ConnectionPool.HTTP != nil {
-				http := map[string]interface{}{}
-				if drConfig.TrafficPolicy.ConnectionPool.HTTP.HTTP1MaxPendingRequests > 0 {
-					http["http1MaxPendingRequests"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.HTTP1MaxPendingRequests
-				}
-				if drConfig.TrafficPolicy.ConnectionPool.HTTP.HTTP2MaxRequests > 0 {
-					http["http2MaxRequests"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.HTTP2MaxRequests
-				}
-				if drConfig.TrafficPolicy.ConnectionPool.HTTP.MaxRequestsPerConnection > 0 {
-					http["maxRequestsPerConnection"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.MaxRequestsPerConnection
-				}
-				if drConfig.TrafficPolicy.ConnectionPool.HTTP.MaxRetries > 0 {
-					http["maxRetries"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.MaxRetries
-				}
-				if drConfig.TrafficPolicy.ConnectionPool.HTTP.IdleTimeout != "" {
-					http["idleTimeout"] = drConfig.TrafficPolicy.ConnectionPool.HTTP.IdleTimeout
-				}
-				if len(http) > 0 {
-					connectionPool["http"] = http
-				}
-			}
-
-			if len(connectionPool) > 0 {
-				trafficPolicy["connectionPool"] = connectionPool
-			}
-		}
-
-		// Add load balancer settings
-		if drConfig.TrafficPolicy.LoadBalancer != nil {
-			loadBalancer := map[string]interface{}{}
-			if drConfig.TrafficPolicy.LoadBalancer.Simple != "" {
-				loadBalancer["simple"] = drConfig.TrafficPolicy.LoadBalancer.Simple
-			} else {
-				loadBalancer["simple"] = "ROUND_ROBIN" // Default load balancing
-			}
-			trafficPolicy["loadBalancer"] = loadBalancer
-		}
-
-		if len(trafficPolicy) > 0 {
-			spec["trafficPolicy"] = trafficPolicy
-		}
+		"subsets": []map[string]interface{}{
+			{
+				"name": "default",
+				"labels": map[string]interface{}{
+					"app.kubernetes.io/name":     "mcp-server",
+					"app.kubernetes.io/instance": mcpServer.Name,
+				},
+			},
+		},
 	}
 
 	// Create DestinationRule resource

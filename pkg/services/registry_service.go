@@ -480,6 +480,64 @@ func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, m
 		}
 	}
 
+	// Enrich transport information (without overwriting user-specified values)
+	if mcpServer.Spec.Transport == nil && spec.Transport != nil {
+		mcpServer.Spec.Transport = &mcpv1.TransportSpec{
+			Type: spec.Transport.Type,
+			Path: spec.Transport.Path,
+		}
+	} else if mcpServer.Spec.Transport != nil && spec.Transport != nil {
+		// Enrich individual transport fields if they're empty
+		if mcpServer.Spec.Transport.Type == "" {
+			mcpServer.Spec.Transport.Type = spec.Transport.Type
+		}
+		if mcpServer.Spec.Transport.Path == "" {
+			mcpServer.Spec.Transport.Path = spec.Transport.Path
+		}
+	}
+
+	// Auto-detect transport type based on ports presence if not specified
+	if mcpServer.Spec.Transport == nil || mcpServer.Spec.Transport.Type == "" {
+		// Initialize transport if nil
+		if mcpServer.Spec.Transport == nil {
+			mcpServer.Spec.Transport = &mcpv1.TransportSpec{}
+		}
+
+		// Auto-detect transport type based on ports presence
+		if len(spec.Ports) == 0 {
+			// No ports in server.yaml → STDIO transport
+			if mcpServer.Spec.Transport.Type == "" {
+				mcpServer.Spec.Transport.Type = "stdio"
+				logger.Info("Auto-detected STDIO transport (no ports in registry)", "serverName", mcpServer.Spec.Registry.ServerName)
+			}
+		} else {
+			// Ports exist in server.yaml → HTTP transport
+			if mcpServer.Spec.Transport.Type == "" {
+				mcpServer.Spec.Transport.Type = "http"
+				logger.Info("Auto-detected HTTP transport (ports found in registry)", "serverName", mcpServer.Spec.Registry.ServerName, "portsCount", len(spec.Ports))
+			}
+		}
+
+		// Fill transport path from registry if available and not specified
+		if mcpServer.Spec.Transport.Path == "" && spec.Transport != nil && spec.Transport.Path != "" {
+			mcpServer.Spec.Transport.Path = spec.Transport.Path
+		}
+	}
+
+	// Enrich ports information (without overwriting user-specified values)
+	if len(mcpServer.Spec.Ports) == 0 && len(spec.Ports) > 0 {
+		mcpServer.Spec.Ports = make([]mcpv1.PortSpec, len(spec.Ports))
+		for i, port := range spec.Ports {
+			mcpServer.Spec.Ports[i] = mcpv1.PortSpec{
+				Name:        port.Name,
+				Port:        port.Port,
+				TargetPort:  port.TargetPort,
+				Protocol:    port.Protocol,
+				AppProtocol: port.AppProtocol,
+			}
+		}
+	}
+
 	// Store template digest in annotations
 	if mcpServer.Annotations == nil {
 		mcpServer.Annotations = make(map[string]string)
