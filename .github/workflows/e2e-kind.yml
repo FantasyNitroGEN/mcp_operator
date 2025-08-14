@@ -254,6 +254,7 @@ jobs:
             --kubeconfig "$KUBECONFIG" \
             --namespace mcp \
             --replicas 1 \
+            --image mcp/postgres \
             --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}'
 
       - name: Patch MCPServer image for docker runtime
