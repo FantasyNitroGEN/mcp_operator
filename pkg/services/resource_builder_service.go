@@ -140,8 +140,8 @@ func (r *DefaultResourceBuilderService) BuildConfigMap(mcpServer *mcpv1.MCPServe
 	}
 
 	// Add environment variables as config
-	for key, value := range mcpServer.Spec.Environment {
-		data[key] = value
+	for _, envVar := range mcpServer.Spec.Env {
+		data[envVar.Name] = envVar.Value
 	}
 
 	configMap := &corev1.ConfigMap{
@@ -548,10 +548,10 @@ func (r *DefaultResourceBuilderService) buildEnvironmentVariables(mcpServer *mcp
 	}
 
 	// Add general environment variables
-	for k, v := range mcpServer.Spec.Environment {
+	for _, envVar := range mcpServer.Spec.Env {
 		envVars = append(envVars, corev1.EnvVar{
-			Name:  k,
-			Value: v,
+			Name:  envVar.Name,
+			Value: envVar.Value,
 		})
 	}
 
