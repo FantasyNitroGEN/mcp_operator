@@ -25,6 +25,7 @@ func newDeployCmd() *cobra.Command {
 		wait        bool
 		waitTimeout time.Duration
 		registry    string
+		image       string
 		// Autoscaling flags
 		autoscale   bool
 		minReplicas int32
@@ -72,7 +73,7 @@ enrich with registry data and deploy as a running server.`,
   mcp deploy filesystem-server --wait --wait-timeout 5m`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeploy(args[0], registry, namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU, envVars, envFromSecrets)
+			return runDeploy(args[0], registry, namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU, envVars, envFromSecrets, image)
 		},
 	}
 
@@ -84,6 +85,7 @@ enrich with registry data and deploy as a running server.`,
 	cmd.Flags().BoolVar(&wait, "wait", false, "Wait for the deployment to be ready")
 	cmd.Flags().DurationVar(&waitTimeout, "wait-timeout", 5*time.Minute, "Timeout for waiting for deployment to be ready")
 	cmd.Flags().StringVar(&registry, "registry", "", "Registry name to deploy server from (required)")
+	cmd.Flags().StringVar(&image, "image", "", "Docker image for runtime=docker (e.g. mcp/postgres)")
 
 	// Autoscaling flags
 	cmd.Flags().BoolVar(&autoscale, "autoscale", false, "Enable horizontal pod autoscaling")
@@ -98,7 +100,7 @@ enrich with registry data and deploy as a running server.`,
 	return cmd
 }
 
-func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string) error {
+func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string, image string) error {
 	// Validate that registry name is provided
 	if registryName == "" {
 		return fmt.Errorf("registry name is required, use --registry flag")
@@ -148,8 +150,9 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 				ServerName:   serverName,
 			},
 			Runtime: mcpv1.MCPRuntimeSpec{
-				Type: "docker", // Default to docker, will be enriched from registry
-				Env:  envMap,
+				Type:  "docker", // Default to docker, will be enriched from registry
+				Image: image,
+				Env:   envMap,
 			},
 			EnvFrom: envFromSources,
 		},
@@ -269,6 +272,11 @@ spec:
 		mcpServer.Spec.Registry.ServerName,
 		mcpServer.Spec.Runtime.Type,
 	)
+
+	// Print image if present
+	if mcpServer.Spec.Runtime.Image != "" {
+		fmt.Printf("\n    image: %s", mcpServer.Spec.Runtime.Image)
+	}
 
 	// Print environment variables if present
 	if len(mcpServer.Spec.Runtime.Env) > 0 {
