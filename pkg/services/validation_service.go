@@ -37,7 +37,7 @@ func (v *DefaultValidationService) ValidateMCPServer(ctx context.Context, mcpSer
 	}
 
 	// Validate runtime specification
-	if err := v.validateRuntimeSpec(mcpServer.Spec.Runtime); err != nil {
+	if err := v.validateRuntimeSpec(mcpServer.Spec.Runtime, mcpServer.Spec.Transport); err != nil {
 		return fmt.Errorf("runtime validation failed: %w", err)
 	}
 
@@ -182,19 +182,19 @@ func (v *DefaultValidationService) ValidateRegistry(ctx context.Context, registr
 
 // validateRegistryInfo validates registry information in MCPServer
 func (v *DefaultValidationService) validateRegistryInfo(registry *mcpv1.RegistryRef) error {
-	if registry == nil || registry.Name == "" {
-		return fmt.Errorf("registry name is required")
+	if registry == nil || registry.Server == "" {
+		return fmt.Errorf("registry server name is required")
 	}
 
-	if len(registry.Name) > 253 {
-		return fmt.Errorf("registry name cannot be longer than 253 characters")
+	if len(registry.Server) > 253 {
+		return fmt.Errorf("registry server name cannot be longer than 253 characters")
 	}
 
 	return nil
 }
 
 // validateRuntimeSpec validates runtime specification
-func (v *DefaultValidationService) validateRuntimeSpec(runtime *mcpv1.RuntimeSpec) error {
+func (v *DefaultValidationService) validateRuntimeSpec(runtime *mcpv1.RuntimeSpec, transport *mcpv1.TransportSpec) error {
 	if runtime == nil || runtime.Type == "" {
 		return fmt.Errorf("runtime type is required")
 	}
@@ -210,9 +210,12 @@ func (v *DefaultValidationService) validateRuntimeSpec(runtime *mcpv1.RuntimeSpe
 		return fmt.Errorf("image is required for docker runtime")
 	}
 
-	// Validate port
-	if runtime.Port < 0 || runtime.Port > 65535 {
-		return fmt.Errorf("port must be between 0 and 65535")
+	// Validate port - skip validation for STDIO transport since ports are not required
+	isStdioTransport := transport != nil && transport.Type == "stdio"
+	if !isStdioTransport {
+		if runtime.Port < 0 || runtime.Port > 65535 {
+			return fmt.Errorf("port must be between 0 and 65535")
+		}
 	}
 
 	return nil

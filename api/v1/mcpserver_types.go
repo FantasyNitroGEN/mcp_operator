@@ -800,35 +800,11 @@ type IstioRetryPolicy struct {
 }
 
 type RegistryRef struct {
-	// RegistryName название MCPRegistry в том же namespace
-	RegistryName string `json:"registryName"`
+	// Registry имя MCPRegistry (например, "default-registry")
+	Registry string `json:"registry"`
 
-	// ServerName имя сервера в реестре
-	ServerName string `json:"serverName"`
-
-	// Имя сервера в MCP Registry (например, "postgres")
-	Name string `json:"name,omitempty"`
-
-	// Version версия сервера
-	Version string `json:"version,omitempty"`
-
-	// Description описание сервера
-	Description string `json:"description,omitempty"`
-
-	// Repository URL репозитория
-	Repository string `json:"repository,omitempty"`
-
-	// License лицензия сервера
-	License string `json:"license,omitempty"`
-
-	// Author автор сервера
-	Author string `json:"author,omitempty"`
-
-	// Keywords ключевые слова
-	Keywords []string `json:"keywords,omitempty"`
-
-	// Capabilities возможности сервера
-	Capabilities []string `json:"capabilities,omitempty"`
+	// Server имя сервера в реестре (например, "postgres")
+	Server string `json:"server"`
 }
 
 // TransportSpec определяет тип транспорта для MCP сервера

@@ -2077,43 +2077,15 @@ spec:
               registry:
                 description: Registry содержит информацию о сервере из MCP Registry
                 properties:
-                  author:
-                    description: Author автор сервера
+                  registry:
+                    description: Registry имя MCPRegistry (например, "default-registry")
                     type: string
-                  capabilities:
-                    description: Capabilities возможности сервера
-                    items:
-                      type: string
-                    type: array
-                  description:
-                    description: Description описание сервера
-                    type: string
-                  keywords:
-                    description: Keywords ключевые слова
-                    items:
-                      type: string
-                    type: array
-                  license:
-                    description: License лицензия сервера
-                    type: string
-                  name:
-                    description: Имя сервера в MCP Registry (например, "postgres")
-                    type: string
-                  registryName:
-                    description: RegistryName название MCPRegistry в том же namespace
-                    type: string
-                  repository:
-                    description: Repository URL репозитория
-                    type: string
-                  serverName:
-                    description: ServerName имя сервера в реестре
-                    type: string
-                  version:
-                    description: Version версия сервера
+                  server:
+                    description: Server имя сервера в реестре (например, "postgres")
                     type: string
                 required:
-                - registryName
-                - serverName
+                - registry
+                - server
                 type: object
               replicas:
                 description: Replicas определяет количество реплик сервера

@@ -279,8 +279,10 @@ func (c *Controller) getGatewayRef(istioConfig *mcpv1.GatewayIstioSpec) string {
 // getPathPrefix returns the path prefix for VirtualService matching
 func (c *Controller) getPathPrefix(mcpServer *mcpv1.MCPServer) string {
 	// Use spec.transport.path if specified, otherwise default to "/mcp" as per issue requirements
-	// Note: TransportSpec might need a Path field added if not already present
-	// For now, using default as per issue requirement
+	if mcpServer.Spec.Transport != nil && mcpServer.Spec.Transport.Path != "" {
+		return mcpServer.Spec.Transport.Path
+	}
+	// Default to "/mcp" as per issue requirement
 	return "/mcp"
 }
 

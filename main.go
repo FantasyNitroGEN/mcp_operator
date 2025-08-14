@@ -158,15 +158,15 @@ func main() {
 	// Setup indexers for efficient object search
 	setupLog.Info("Setting up field indexers for efficient object search")
 
-	// Index MCPServer by spec.registry.name for efficient registry-based queries
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &mcpv1.MCPServer{}, "spec.registry.name", func(rawObj client.Object) []string {
+	// Index MCPServer by spec.registry.server for efficient registry-based queries
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &mcpv1.MCPServer{}, "spec.registry.server", func(rawObj client.Object) []string {
 		mcpServer := rawObj.(*mcpv1.MCPServer)
-		if mcpServer.Spec.Registry.Name == "" {
+		if mcpServer.Spec.Registry.Server == "" {
 			return nil
 		}
-		return []string{mcpServer.Spec.Registry.Name}
+		return []string{mcpServer.Spec.Registry.Server}
 	}); err != nil {
-		setupLog.Error(err, "unable to create index for MCPServer spec.registry.name")
+		setupLog.Error(err, "unable to create index for MCPServer spec.registry.server")
 		os.Exit(1)
 	}
 

@@ -157,39 +157,38 @@ func (r *DefaultRegistryService) EnrichMCPServer(ctx context.Context, mcpServer 
 	logger := log.FromContext(ctx).WithValues("mcpserver", mcpServer.Name, "registry", registryName)
 	logger.Info("Enriching MCPServer with registry data")
 
-	// Skip if already enriched
-	if mcpServer.Spec.Registry.Version != "" && mcpServer.Spec.Runtime.Image != "" {
+	// Initialize annotations if nil
+	if mcpServer.Annotations == nil {
+		mcpServer.Annotations = make(map[string]string)
+	}
+
+	// Skip if already enriched (check annotations instead of non-existent fields)
+	if mcpServer.Annotations["mcp.allbeone.io/registry-version"] != "" && mcpServer.Spec.Runtime.Image != "" {
 		logger.Info("MCPServer already enriched with registry data")
 		return nil
 	}
 
 	// Fetch server specification
-	spec, err := r.FetchServerSpec(ctx, registryName, mcpServer.Spec.Registry.Name)
+	spec, err := r.FetchServerSpec(ctx, registryName, mcpServer.Spec.Registry.Server)
 	if err != nil {
 		return fmt.Errorf("failed to fetch server spec for enrichment: %w", err)
 	}
 
-	// Enrich registry information
-	if mcpServer.Spec.Registry.Version == "" {
-		mcpServer.Spec.Registry.Version = spec.Version
+	// Store registry information in annotations
+	if mcpServer.Annotations["mcp.allbeone.io/registry-version"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-version"] = spec.Version
 	}
-	if mcpServer.Spec.Registry.Description == "" {
-		mcpServer.Spec.Registry.Description = spec.Description
+	if mcpServer.Annotations["mcp.allbeone.io/registry-description"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-description"] = spec.Description
 	}
-	if mcpServer.Spec.Registry.Repository == "" {
-		mcpServer.Spec.Registry.Repository = spec.Repository
+	if mcpServer.Annotations["mcp.allbeone.io/registry-repository"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-repository"] = spec.Repository
 	}
-	if mcpServer.Spec.Registry.License == "" {
-		mcpServer.Spec.Registry.License = spec.License
+	if mcpServer.Annotations["mcp.allbeone.io/registry-license"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-license"] = spec.License
 	}
-	if mcpServer.Spec.Registry.Author == "" {
-		mcpServer.Spec.Registry.Author = spec.Author
-	}
-	if len(mcpServer.Spec.Registry.Keywords) == 0 {
-		mcpServer.Spec.Registry.Keywords = spec.Keywords
-	}
-	if len(mcpServer.Spec.Registry.Capabilities) == 0 {
-		mcpServer.Spec.Registry.Capabilities = spec.Capabilities
+	if mcpServer.Annotations["mcp.allbeone.io/registry-author"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-author"] = spec.Author
 	}
 
 	// Enrich runtime information
@@ -237,20 +236,23 @@ func (r *DefaultRegistryService) ForceEnrichMCPServer(ctx context.Context, mcpSe
 	logger := log.FromContext(ctx).WithValues("mcpserver", mcpServer.Name, "registry", registryName)
 	logger.Info("Force enriching MCPServer with registry data")
 
+	// Initialize annotations if nil
+	if mcpServer.Annotations == nil {
+		mcpServer.Annotations = make(map[string]string)
+	}
+
 	// Fetch server specification (always fetch, no skip check)
-	spec, err := r.FetchServerSpec(ctx, registryName, mcpServer.Spec.Registry.Name)
+	spec, err := r.FetchServerSpec(ctx, registryName, mcpServer.Spec.Registry.Server)
 	if err != nil {
 		return fmt.Errorf("failed to fetch server spec for force enrichment: %w", err)
 	}
 
-	// Always enrich registry information (overwrite existing values)
-	mcpServer.Spec.Registry.Version = spec.Version
-	mcpServer.Spec.Registry.Description = spec.Description
-	mcpServer.Spec.Registry.Repository = spec.Repository
-	mcpServer.Spec.Registry.License = spec.License
-	mcpServer.Spec.Registry.Author = spec.Author
-	mcpServer.Spec.Registry.Keywords = spec.Keywords
-	mcpServer.Spec.Registry.Capabilities = spec.Capabilities
+	// Always store registry information in annotations (overwrite existing values)
+	mcpServer.Annotations["mcp.allbeone.io/registry-version"] = spec.Version
+	mcpServer.Annotations["mcp.allbeone.io/registry-description"] = spec.Description
+	mcpServer.Annotations["mcp.allbeone.io/registry-repository"] = spec.Repository
+	mcpServer.Annotations["mcp.allbeone.io/registry-license"] = spec.License
+	mcpServer.Annotations["mcp.allbeone.io/registry-author"] = spec.Author
 
 	// Always enrich runtime information (overwrite existing values)
 	mcpServer.Spec.Runtime.Type = spec.Runtime.Type
@@ -380,21 +382,21 @@ func (r *DefaultRegistryService) GetRegistryClient() *registry.Client {
 func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, mcpServer *mcpv1.MCPServer, namespace string) error {
 	logger := log.FromContext(ctx).WithValues(
 		"mcpserver", mcpServer.Name,
-		"registryName", mcpServer.Spec.Registry.RegistryName,
-		"serverName", mcpServer.Spec.Registry.ServerName,
+		"registryName", mcpServer.Spec.Registry.Registry,
+		"serverName", mcpServer.Spec.Registry.Server,
 	)
 	logger.Info("Enriching MCPServer from cache")
 
 	// Validate required fields
-	if mcpServer.Spec.Registry.RegistryName == "" {
+	if mcpServer.Spec.Registry.Registry == "" {
 		return fmt.Errorf("registry name is required for cache enrichment")
 	}
-	if mcpServer.Spec.Registry.ServerName == "" {
+	if mcpServer.Spec.Registry.Server == "" {
 		return fmt.Errorf("server name is required for cache enrichment")
 	}
 
 	// Find ConfigMap mcpregistry-<registryName>-<serverName>
-	configMapName := fmt.Sprintf("mcpregistry-%s-%s", mcpServer.Spec.Registry.RegistryName, mcpServer.Spec.Registry.ServerName)
+	configMapName := fmt.Sprintf("mcpregistry-%s-%s", mcpServer.Spec.Registry.Registry, mcpServer.Spec.Registry.Server)
 	configMap := &corev1.ConfigMap{}
 
 	// Use the provided namespace parameter instead of mcpServer.Namespace
@@ -431,27 +433,26 @@ func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, m
 		mcpServer.Spec.Runtime = &mcpv1.RuntimeSpec{}
 	}
 
-	// Enrich registry information (without overwriting user-specified values)
-	if mcpServer.Spec.Registry.Version == "" {
-		mcpServer.Spec.Registry.Version = spec.Version
+	// Initialize annotations if nil
+	if mcpServer.Annotations == nil {
+		mcpServer.Annotations = make(map[string]string)
 	}
-	if mcpServer.Spec.Registry.Description == "" {
-		mcpServer.Spec.Registry.Description = spec.Description
+
+	// Store registry information in annotations (without overwriting user-specified values)
+	if mcpServer.Annotations["mcp.allbeone.io/registry-version"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-version"] = spec.Version
 	}
-	if mcpServer.Spec.Registry.Repository == "" {
-		mcpServer.Spec.Registry.Repository = spec.Repository
+	if mcpServer.Annotations["mcp.allbeone.io/registry-description"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-description"] = spec.Description
 	}
-	if mcpServer.Spec.Registry.License == "" {
-		mcpServer.Spec.Registry.License = spec.License
+	if mcpServer.Annotations["mcp.allbeone.io/registry-repository"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-repository"] = spec.Repository
 	}
-	if mcpServer.Spec.Registry.Author == "" {
-		mcpServer.Spec.Registry.Author = spec.Author
+	if mcpServer.Annotations["mcp.allbeone.io/registry-license"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-license"] = spec.License
 	}
-	if len(mcpServer.Spec.Registry.Keywords) == 0 {
-		mcpServer.Spec.Registry.Keywords = spec.Keywords
-	}
-	if len(mcpServer.Spec.Registry.Capabilities) == 0 {
-		mcpServer.Spec.Registry.Capabilities = spec.Capabilities
+	if mcpServer.Annotations["mcp.allbeone.io/registry-author"] == "" {
+		mcpServer.Annotations["mcp.allbeone.io/registry-author"] = spec.Author
 	}
 
 	// Enrich runtime information (without overwriting user-specified values)
@@ -508,13 +509,13 @@ func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, m
 			// No ports in server.yaml → STDIO transport
 			if mcpServer.Spec.Transport.Type == "" {
 				mcpServer.Spec.Transport.Type = "stdio"
-				logger.Info("Auto-detected STDIO transport (no ports in registry)", "serverName", mcpServer.Spec.Registry.ServerName)
+				logger.Info("Auto-detected STDIO transport (no ports in registry)", "serverName", mcpServer.Spec.Registry.Server)
 			}
 		} else {
 			// Ports exist in server.yaml → HTTP transport
 			if mcpServer.Spec.Transport.Type == "" {
 				mcpServer.Spec.Transport.Type = "http"
-				logger.Info("Auto-detected HTTP transport (ports found in registry)", "serverName", mcpServer.Spec.Registry.ServerName, "portsCount", len(spec.Ports))
+				logger.Info("Auto-detected HTTP transport (ports found in registry)", "serverName", mcpServer.Spec.Registry.Server, "portsCount", len(spec.Ports))
 			}
 		}
 

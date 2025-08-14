@@ -189,8 +189,8 @@ func (r *DefaultRendererService) AddRequiredLabels(obj client.Object, mcpServer 
 
 	// Add required labels from the issue description
 	labels["mcp.allbeone.io/name"] = mcpServer.Name
-	labels["mcp.allbeone.io/registry"] = mcpServer.Spec.Registry.RegistryName
-	labels["mcp.allbeone.io/server"] = mcpServer.Spec.Registry.ServerName
+	labels["mcp.allbeone.io/registry"] = mcpServer.Spec.Registry.Registry
+	labels["mcp.allbeone.io/server"] = mcpServer.Spec.Registry.Server
 
 	obj.SetLabels(labels)
 }

@@ -395,11 +395,12 @@ func (r *DefaultResourceBuilderService) buildLabels(mcpServer *mcpv1.MCPServer) 
 	}
 
 	// Add registry information
-	if mcpServer.Spec.Registry.Name != "" {
-		labels["mcp.allbeone.io/server-name"] = mcpServer.Spec.Registry.Name
+	if mcpServer.Spec.Registry.Server != "" {
+		labels["mcp.allbeone.io/server-name"] = mcpServer.Spec.Registry.Server
 	}
-	if mcpServer.Spec.Registry.Version != "" {
-		labels["mcp.allbeone.io/server-version"] = mcpServer.Spec.Registry.Version
+	// Version is stored in annotations, get it from there if needed
+	if mcpServer.Annotations != nil && mcpServer.Annotations["mcp.allbeone.io/registry-version"] != "" {
+		labels["mcp.allbeone.io/server-version"] = mcpServer.Annotations["mcp.allbeone.io/registry-version"]
 	}
 
 	// Add tenancy information
@@ -497,6 +498,13 @@ func (r *DefaultResourceBuilderService) buildPodTemplate(mcpServer *mcpv1.MCPSer
 func (r *DefaultResourceBuilderService) collectContainerPorts(mcpServer *mcpv1.MCPServer) []corev1.ContainerPort {
 	var containerPorts []corev1.ContainerPort
 
+	// Skip ports for STDIO transport without gateway
+	if mcpServer.Spec.Transport != nil && mcpServer.Spec.Transport.Type == "stdio" {
+		if mcpServer.Spec.Gateway == nil || !mcpServer.Spec.Gateway.Enabled {
+			return containerPorts // return empty ports
+		}
+	}
+
 	// First priority: use spec.ports[] if provided
 	if len(mcpServer.Spec.Ports) > 0 {
 		for _, portSpec := range mcpServer.Spec.Ports {
@@ -593,6 +601,7 @@ func (r *DefaultResourceBuilderService) buildContainer(mcpServer *mcpv1.MCPServe
 	}
 
 	// Add health checks (TCP probes on first container port)
+	// Skip health checks for STDIO transport without gateway (no ports available)
 	if len(containerPorts) > 0 {
 		firstPort := containerPorts[0].ContainerPort
 

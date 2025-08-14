@@ -335,11 +335,12 @@ func (r *SimpleResourceBuilderService) buildLabels(mcpServer *mcpv1.MCPServer) m
 	}
 
 	// Add registry information
-	if mcpServer.Spec.Registry.Name != "" {
-		labels["mcp.allbeone.io/server-name"] = mcpServer.Spec.Registry.Name
+	if mcpServer.Spec.Registry.Server != "" {
+		labels["mcp.allbeone.io/server-name"] = mcpServer.Spec.Registry.Server
 	}
-	if mcpServer.Spec.Registry.Version != "" {
-		labels["mcp.allbeone.io/server-version"] = mcpServer.Spec.Registry.Version
+	// Version is stored in annotations, get it from there if needed
+	if mcpServer.Annotations != nil && mcpServer.Annotations["mcp.allbeone.io/registry-version"] != "" {
+		labels["mcp.allbeone.io/server-version"] = mcpServer.Annotations["mcp.allbeone.io/registry-version"]
 	}
 
 	// Add tenancy information

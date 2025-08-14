@@ -287,9 +287,19 @@ func (v *MCPServerValidator) validateTenantConfiguration(mcpServer *mcpv1.MCPSer
 }
 
 func (d *MCPServerDefaulter) setDefaults(mcpServer *mcpv1.MCPServer) {
-	// Default registry.name to metadata.name if empty
-	if mcpServer.Spec.Registry != nil && mcpServer.Spec.Registry.Name == "" {
-		mcpServer.Spec.Registry.Name = mcpServer.Name
+	// Initialize registry if nil
+	if mcpServer.Spec.Registry == nil {
+		mcpServer.Spec.Registry = &mcpv1.RegistryRef{}
+	}
+
+	// Default registry.server to metadata.name if empty
+	if mcpServer.Spec.Registry.Server == "" {
+		mcpServer.Spec.Registry.Server = mcpServer.Name
+	}
+
+	// Default registry.registry to "default-registry" if empty
+	if mcpServer.Spec.Registry.Registry == "" {
+		mcpServer.Spec.Registry.Registry = "default-registry"
 	}
 
 	// Convert old spec.port to spec.ports if spec.ports is empty
