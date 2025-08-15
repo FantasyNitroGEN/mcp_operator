@@ -165,6 +165,98 @@ jobs:
           echo "--- recent events ---"
           kubectl -n mcp get events --sort-by=.lastTimestamp | tail -n 50 || true
 
+      - name: Verify operator and webhooks are installed and working
+        run: |
+          set -e
+          echo "=== Проверка CRD ==="
+          # список CRD
+          echo "CRDs with mcp domain:"
+          kubectl get crd | grep mcp || { echo "::error::No MCP CRDs found"; exit 1; }
+          
+          # проверка конкретных CRD
+          EXPECTED_CRDS="mcpservers.mcp.allbeone.io mcpserverbackups.mcp.allbeone.io mcpregistries.mcp.allbeone.io"
+          for crd in $EXPECTED_CRDS; do
+            if ! kubectl get crd "$crd" >/dev/null 2>&1; then
+              echo "::error::Required CRD not found: $crd"
+              exit 1
+            fi
+            echo "✓ CRD found: $crd"
+          done
+          
+          echo "=== Проверка вебхуков ==="
+          # валидирующие вебхуки
+          echo "Validating webhooks with mcp:"
+          VALIDATING_WEBHOOKS=$(kubectl get validatingwebhookconfigurations | grep mcp || true)
+          if [ -z "$VALIDATING_WEBHOOKS" ]; then
+            echo "::error::No MCP validating webhooks found"
+            kubectl get validatingwebhookconfigurations
+            exit 1
+          fi
+          echo "$VALIDATING_WEBHOOKS"
+          
+          # мутирующие вебхуки  
+          echo "Mutating webhooks with mcp:"
+          MUTATING_WEBHOOKS=$(kubectl get mutatingwebhookconfigurations | grep mcp || true)
+          if [ -z "$MUTATING_WEBHOOKS" ]; then
+            echo "::error::No MCP mutating webhooks found"
+            kubectl get mutatingwebhookconfigurations
+            exit 1
+          fi
+          echo "$MUTATING_WEBHOOKS"
+          
+          echo "=== Проверка подов оператора ==="
+          # поды оператора
+          echo "MCP operator pods:"
+          OPERATOR_PODS=$(kubectl get pods -A | grep mcp-operator || true)
+          if [ -z "$OPERATOR_PODS" ]; then
+            echo "::error::No MCP operator pods found"
+            kubectl get pods -A
+            exit 1
+          fi
+          echo "$OPERATOR_PODS"
+          
+          # проверка статуса подов (Ready=1/1)
+          OPERATOR_POD_NAME=$(kubectl -n mcp get pods -l control-plane=controller-manager -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+          if [ -z "$OPERATOR_POD_NAME" ]; then
+            # fallback: поиск по имени
+            OPERATOR_POD_NAME=$(kubectl -n mcp get pods | grep mcp-operator | awk '{print $1}' | head -1 || true)
+          fi
+          
+          if [ -n "$OPERATOR_POD_NAME" ]; then
+            echo "Checking operator pod readiness: $OPERATOR_POD_NAME"
+            READY_STATUS=$(kubectl -n mcp get pod "$OPERATOR_POD_NAME" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
+            if [ "$READY_STATUS" != "true" ]; then
+              echo "::error::Operator pod is not ready: $OPERATOR_POD_NAME"
+              kubectl -n mcp describe pod "$OPERATOR_POD_NAME"
+              exit 1
+            fi
+            echo "✓ Operator pod is ready: $OPERATOR_POD_NAME"
+            
+            echo "=== Проверка логов оператора ==="
+            # проверка логов на ошибки webhook server/порт
+            echo "Checking operator logs for webhook server errors:"
+            WEBHOOK_ERRORS=$(kubectl -n mcp logs "$OPERATOR_POD_NAME" --since=5m | grep -i -E "(webhook.*server.*error|webhook.*port.*error|failed.*webhook|webhook.*failed)" || true)
+            if [ -n "$WEBHOOK_ERRORS" ]; then
+              echo "::error::Webhook server errors found in logs:"
+              echo "$WEBHOOK_ERRORS"
+              exit 1
+            fi
+            echo "✓ No webhook server errors found in logs"
+            
+            # показать последние логи для контекста
+            echo "Recent operator logs (last 10 lines):"
+            kubectl -n mcp logs "$OPERATOR_POD_NAME" --since=2m | tail -10 || true
+          else
+            echo "::error::Could not find operator pod"
+            kubectl -n mcp get pods
+            exit 1
+          fi
+          
+          echo "=== Критерий готовности: ✓ PASSED ==="
+          echo "✓ Вебхуки присутствуют"
+          echo "✓ Поды оператора в Ready=1/1" 
+          echo "✓ В логах нет ошибок про webhook server/порт"
+
       - name: operator RBAC for core
         run: |
           set -e

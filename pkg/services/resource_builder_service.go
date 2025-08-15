@@ -395,7 +395,9 @@ func (r *DefaultResourceBuilderService) buildLabels(mcpServer *mcpv1.MCPServer) 
 	}
 
 	// Add registry information
+	//nolint:staticcheck
 	if mcpServer.Spec.Registry.Server != "" {
+		//nolint:staticcheck
 		labels["mcp.allbeone.io/server-name"] = mcpServer.Spec.Registry.Server
 	}
 	// Version is stored in annotations, get it from there if needed
@@ -567,6 +569,11 @@ func (r *DefaultResourceBuilderService) buildContainer(mcpServer *mcpv1.MCPServe
 		return r.buildGatewayContainer(mcpServer)
 	}
 
+	// Check if runtime type is binary - use binary container with proxy
+	if mcpServer.Spec.Runtime != nil && mcpServer.Spec.Runtime.Type == "binary" {
+		return r.buildBinaryContainer(mcpServer)
+	}
+
 	// Collect container ports dynamically
 	containerPorts := r.collectContainerPorts(mcpServer)
 
@@ -630,6 +637,107 @@ func (r *DefaultResourceBuilderService) buildContainer(mcpServer *mcpv1.MCPServe
 			FailureThreshold:    3,
 			SuccessThreshold:    1,
 		}
+	}
+
+	return container
+}
+
+// buildBinaryContainer builds a container for binary runtime that runs binary executable with TCP-to-STDIO proxy
+func (r *DefaultResourceBuilderService) buildBinaryContainer(mcpServer *mcpv1.MCPServer) corev1.Container {
+	runtime := mcpServer.Spec.Runtime
+
+	// Use default proxy port if runtime port is not specified
+	proxyPort := runtime.Port
+	if proxyPort == 0 {
+		proxyPort = 8080 // Default proxy port for binary runtime
+	}
+
+	// Build container ports for the proxy
+	containerPorts := []corev1.ContainerPort{
+		{
+			Name:          "mcp",
+			ContainerPort: proxyPort,
+			Protocol:      corev1.ProtocolTCP,
+		},
+	}
+
+	// For binary runtime, we need a base image that can run the proxy and the binary
+	// If no image is specified, use a default base image with proxy capability
+	image := runtime.Image
+	if image == "" {
+		image = "alpine:latest" // Default base image for binary runtime
+	}
+
+	// Build command to run the binary executable
+	var containerCommand []string
+	var containerArgs []string
+
+	// If specific command is provided, use it
+	if len(runtime.Command) > 0 {
+		containerCommand = runtime.Command
+		if len(runtime.Args) > 0 {
+			containerArgs = runtime.Args
+		}
+	} else if len(runtime.Args) > 0 {
+		// If only args provided, assume they contain the executable
+		containerCommand = []string{runtime.Args[0]}
+		if len(runtime.Args) > 1 {
+			containerArgs = runtime.Args[1:]
+		}
+	} else {
+		// Default command for binary runtime - this should be overridden
+		containerCommand = []string{"/bin/sh", "-c", "echo 'Binary executable not specified'; sleep infinity"}
+	}
+
+	container := corev1.Container{
+		Name:    "mcp-binary",
+		Image:   image,
+		Command: containerCommand,
+		Args:    containerArgs,
+		Ports:   containerPorts,
+		Env:     r.buildBinaryEnvironmentVariables(mcpServer, runtime, proxyPort),
+	}
+
+	// Add resource requirements
+	if !r.isResourceRequirementsEmpty(mcpServer.Spec.Resources) {
+		container.Resources = r.buildResourceRequirements(mcpServer.Spec.Resources)
+	}
+
+	// Add volume mounts
+	if len(mcpServer.Spec.VolumeMounts) > 0 {
+		container.VolumeMounts = r.buildVolumeMounts(mcpServer.Spec.VolumeMounts)
+	}
+
+	// Add security context
+	if mcpServer.Spec.SecurityContext != nil {
+		container.SecurityContext = mcpServer.Spec.SecurityContext
+	}
+
+	// Add health checks - for binary runtime, use TCP probe on the proxy port
+	container.LivenessProbe = &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			TCPSocket: &corev1.TCPSocketAction{
+				Port: intstr.FromInt32(proxyPort),
+			},
+		},
+		InitialDelaySeconds: 30,
+		PeriodSeconds:       10,
+		TimeoutSeconds:      5,
+		FailureThreshold:    3,
+		SuccessThreshold:    1,
+	}
+
+	container.ReadinessProbe = &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			TCPSocket: &corev1.TCPSocketAction{
+				Port: intstr.FromInt32(proxyPort),
+			},
+		},
+		InitialDelaySeconds: 5,
+		PeriodSeconds:       5,
+		TimeoutSeconds:      3,
+		FailureThreshold:    3,
+		SuccessThreshold:    1,
 	}
 
 	return container
@@ -787,6 +895,58 @@ func (r *DefaultResourceBuilderService) buildGatewayEnvironmentVariables(mcpServ
 	envVars = append(envVars, corev1.EnvVar{
 		Name:  "GATEWAY_PORT",
 		Value: strconv.Itoa(int(gatewayPort)),
+	})
+
+	return envVars
+}
+
+// buildBinaryEnvironmentVariables builds environment variables for binary runtime containers
+func (r *DefaultResourceBuilderService) buildBinaryEnvironmentVariables(mcpServer *mcpv1.MCPServer, runtime *mcpv1.RuntimeSpec, proxyPort int32) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{}
+
+	// Add runtime environment variables for the binary executable
+	if runtime != nil {
+		for k, v := range runtime.Env {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  k,
+				Value: v,
+			})
+		}
+	}
+
+	// Add general environment variables
+	envVars = append(envVars, mcpServer.Spec.Env...)
+
+	// Add standard MCP environment variables
+	envVars = append(envVars, []corev1.EnvVar{
+		{
+			Name: "MCP_SERVER_NAME",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			},
+		},
+		{
+			Name: "MCP_SERVER_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.namespace",
+				},
+			},
+		},
+	}...)
+
+	// Add binary proxy port environment variable
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "MCP_SERVER_PORT",
+		Value: strconv.Itoa(int(proxyPort)),
+	})
+
+	// Add binary-specific environment variable to indicate runtime type
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "MCP_RUNTIME_TYPE",
+		Value: "binary",
 	})
 
 	return envVars

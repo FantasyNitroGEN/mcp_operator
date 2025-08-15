@@ -800,13 +800,19 @@ type IstioRetryPolicy struct {
 }
 
 type RegistryRef struct {
-	// Имя MCPRegistry-ресурса (должно существовать в ns). Нужно для поиска кэша.
-	Name string `json:"name"`
+	// Deprecated: use RegistryName instead. Имя MCPRegistry-ресурса (должно существовать в ns). Нужно для поиска кэша.
+	Name string `json:"name,omitempty"`
+
+	// RegistryName название MCPRegistry в том же namespace
+	RegistryName string `json:"registryName,omitempty"`
+
+	// ServerName имя сервера в реестре
+	ServerName string `json:"serverName,omitempty"`
 
 	// Registry имя MCPRegistry (например, "default-registry") - алиас для обратной совместимости
 	Registry string `json:"registry,omitempty"`
 
-	// (Опционально) имя сервера в реестре; если пусто — берем metadata.name
+	// Deprecated: use ServerName instead. (Опционально) имя сервера в реестре; если пусто — берем metadata.name
 	Server string `json:"server,omitempty"`
 }
 

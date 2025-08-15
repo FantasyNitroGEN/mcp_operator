@@ -118,12 +118,23 @@ func (v *MCPServerValidator) validateImageSecurity(mcpServer *mcpv1.MCPServer) f
 	// Only require image for docker runtime type
 	if mcpServer.Spec.Runtime != nil && mcpServer.Spec.Runtime.Type == "docker" {
 		image := mcpServer.Spec.Runtime.Image
+
+		// Check if registry is specified - if so, allow empty image
+		registrySpecified := mcpServer.Spec.Registry != nil &&
+			(mcpServer.Spec.Registry.RegistryName != "" ||
+				mcpServer.Spec.Registry.Name != "" || //nolint:staticcheck // Backward compatibility check
+				mcpServer.Spec.Registry.Registry != "")
+
 		if image == "" {
-			allErrs = append(allErrs, field.Required(specPath.Child("runtime", "image"), "image is required for docker runtime"))
+			if !registrySpecified {
+				allErrs = append(allErrs, field.Required(specPath.Child("runtime", "image"), "image is required for docker runtime when registry is not specified"))
+				return allErrs
+			}
+			// If registry is specified and image is empty, that's allowed - operator will pull from registry
 			return allErrs
 		}
 
-		// Validate image registry for docker runtime
+		// Validate image registry for docker runtime (only when image is provided)
 		isTrusted := false
 		for _, registry := range trustedRegistries {
 			if strings.HasPrefix(image, registry) {
@@ -292,19 +303,19 @@ func (d *MCPServerDefaulter) setDefaults(mcpServer *mcpv1.MCPServer) {
 		mcpServer.Spec.Registry = &mcpv1.RegistryRef{}
 	}
 
-	// Default registry.server to metadata.name if empty
-	if mcpServer.Spec.Registry.Server == "" {
-		mcpServer.Spec.Registry.Server = mcpServer.Name
+	// Default registry.serverName to metadata.name if empty
+	if mcpServer.Spec.Registry.ServerName == "" {
+		mcpServer.Spec.Registry.ServerName = mcpServer.Name
 	}
 
-	// Backward compatibility: copy Registry to Name if Name is empty and Registry is not empty
-	if mcpServer.Spec.Registry.Name == "" && mcpServer.Spec.Registry.Registry != "" {
-		mcpServer.Spec.Registry.Name = mcpServer.Spec.Registry.Registry
+	// Backward compatibility: copy Registry to RegistryName if RegistryName is empty and Registry is not empty
+	if mcpServer.Spec.Registry.RegistryName == "" && mcpServer.Spec.Registry.Registry != "" {
+		mcpServer.Spec.Registry.RegistryName = mcpServer.Spec.Registry.Registry
 	}
 
-	// Default registry.name to "default-registry" if empty
-	if mcpServer.Spec.Registry.Name == "" {
-		mcpServer.Spec.Registry.Name = "default-registry"
+	// Default registry.registryName to "default-registry" if empty
+	if mcpServer.Spec.Registry.RegistryName == "" {
+		mcpServer.Spec.Registry.RegistryName = "default-registry"
 	}
 
 	// Default registry.registry to "default-registry" if empty (for backward compatibility)

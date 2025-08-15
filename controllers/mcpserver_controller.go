@@ -112,8 +112,22 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Add MCPServer details to logger context
 	var registryName, serverName string
 	if mcpServer.Spec.Registry != nil {
-		registryName = mcpServer.Spec.Registry.Registry
-		serverName = mcpServer.Spec.Registry.Server
+		// Use new fields first, fall back to deprecated fields for backward compatibility
+		if mcpServer.Spec.Registry.RegistryName != "" {
+			registryName = mcpServer.Spec.Registry.RegistryName
+		} else if mcpServer.Spec.Registry.Registry != "" {
+			registryName = mcpServer.Spec.Registry.Registry
+		} else {
+			//nolint:staticcheck
+			registryName = mcpServer.Spec.Registry.Name // fallback to deprecated Name field
+		}
+
+		if mcpServer.Spec.Registry.ServerName != "" {
+			serverName = mcpServer.Spec.Registry.ServerName
+		} else {
+			//nolint:staticcheck
+			serverName = mcpServer.Spec.Registry.Server // fallback to deprecated Server field
+		}
 	}
 	logger = logger.WithValues(
 		"generation", mcpServer.Generation,
@@ -533,8 +547,8 @@ func (r *MCPServerReconciler) handleDeletion(ctx context.Context, logger logr.Lo
 		cacheKey := fmt.Sprintf("mcpserver:%s:%s", mcpServer.Namespace, mcpServer.Name)
 		r.CacheService.InvalidateMCPServer(ctx, cacheKey)
 		// Also invalidate registry servers cache since server is being deleted
-		if mcpServer.Spec.Registry.Server != "" {
-			r.CacheService.InvalidateRegistryServers(ctx, mcpServer.Spec.Registry.Server)
+		if mcpServer.Spec.Registry.Server != "" { //nolint:staticcheck
+			r.CacheService.InvalidateRegistryServers(ctx, mcpServer.Spec.Registry.Server) //nolint:staticcheck
 		}
 		logger.V(1).Info("Invalidated cache entries for deleted MCPServer", "cacheKey", cacheKey)
 	}
@@ -642,7 +656,7 @@ func (r *MCPServerReconciler) findMCPServersForConfigMap(ctx context.Context, co
 	for _, mcpServer := range mcpServerList.Items {
 		if mcpServer.Spec.Registry != nil &&
 			mcpServer.Spec.Registry.Registry == registryName &&
-			mcpServer.Spec.Registry.Server == serverName {
+			mcpServer.Spec.Registry.Server == serverName { //nolint:staticcheck
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      mcpServer.Name,
@@ -751,6 +765,7 @@ func (r *MCPServerReconciler) applyRenderedResources(ctx context.Context, logger
 		labels["mcp.allbeone.io/name"] = mcpServer.Name
 		if mcpServer.Spec.Registry != nil {
 			labels["mcp.allbeone.io/registry"] = mcpServer.Spec.Registry.Registry
+			//nolint:staticcheck
 			labels["mcp.allbeone.io/server"] = mcpServer.Spec.Registry.Server
 		}
 		labels["mcp.allbeone.io/hash"] = renderedHash

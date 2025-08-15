@@ -182,12 +182,43 @@ func (v *DefaultValidationService) ValidateRegistry(ctx context.Context, registr
 
 // validateRegistryInfo validates registry information in MCPServer
 func (v *DefaultValidationService) validateRegistryInfo(registry *mcpv1.RegistryRef) error {
-	if registry == nil || registry.Server == "" {
-		return fmt.Errorf("registry server name is required")
+	if registry == nil {
+		return fmt.Errorf("registry information is required")
 	}
 
-	if len(registry.Server) > 253 {
-		return fmt.Errorf("registry server name cannot be longer than 253 characters")
+	// Check for the new field structure (registryName and serverName)
+	hasNewFields := registry.RegistryName != "" || registry.ServerName != ""
+	// Check for old field structure (name and server)
+	hasOldFields := registry.Name != "" || registry.Server != "" //nolint:staticcheck // Backward compatibility validation
+
+	if !hasNewFields && !hasOldFields {
+		return fmt.Errorf("registry name is required: either use registryName and serverName fields, or the deprecated name and server fields")
+	}
+
+	// Validate new field structure
+	if hasNewFields {
+		if registry.ServerName == "" {
+			return fmt.Errorf("serverName is required when using new registry field structure")
+		}
+		if len(registry.ServerName) > 253 {
+			return fmt.Errorf("registry serverName cannot be longer than 253 characters")
+		}
+		if registry.RegistryName != "" && len(registry.RegistryName) > 253 {
+			return fmt.Errorf("registry registryName cannot be longer than 253 characters")
+		}
+	}
+
+	// Validate old field structure (for backward compatibility)
+	if hasOldFields && !hasNewFields {
+		if registry.Server == "" && registry.Name == "" { //nolint:staticcheck // Backward compatibility validation
+			return fmt.Errorf("registry name is required")
+		}
+		if registry.Server != "" && len(registry.Server) > 253 { //nolint:staticcheck // Backward compatibility validation
+			return fmt.Errorf("registry server name cannot be longer than 253 characters")
+		}
+		if registry.Name != "" && len(registry.Name) > 253 { //nolint:staticcheck // Backward compatibility validation
+			return fmt.Errorf("registry name cannot be longer than 253 characters")
+		}
 	}
 
 	return nil
@@ -205,7 +236,7 @@ func (v *DefaultValidationService) validateRuntimeSpec(runtime *mcpv1.RuntimeSpe
 			runtime.Type, strings.Join(validTypes, ", "))
 	}
 
-	// For docker runtime, image is required
+	// For docker runtime, an image is required
 	if runtime.Type == "docker" && runtime.Image == "" {
 		return fmt.Errorf("image is required for docker runtime")
 	}

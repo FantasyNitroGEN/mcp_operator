@@ -112,7 +112,7 @@ enrich with registry data and deploy as a running server.`,
 
 	// Port flags
 	cmd.Flags().StringArrayVar(&ports, "ports", []string{}, "Port configuration name:port[:targetPort[:protocol[:appProtocol]]] (can be repeated)")
-	cmd.Flags().Int32Var(&port, "port", 0, "DEPRECATED: Port number (use --ports instead)")
+	cmd.Flags().Int32Var(&port, "port", 0, "Port number for MCP server (sets MCPServer.Spec.Runtime.Port)")
 
 	// Gateway flags
 	cmd.Flags().BoolVar(&gateway, "gateway", false, "Enable gateway")
@@ -267,14 +267,8 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 		return fmt.Errorf("unsupported transport type: %s. Valid options: stdio, http, streamable-http", transport)
 	}
 
-	// Handle deprecated --port flag
-	if port > 0 {
-		fmt.Fprintf(os.Stderr, "WARNING: --port flag is DEPRECATED. Use --ports instead.\n")
-		if len(ports) == 0 {
-			// Convert deprecated port to ports format
-			ports = []string{fmt.Sprintf("%d", port)}
-		}
-	}
+	// Handle --port flag - this will set MCPServer.Spec.Runtime.Port
+	// The --ports flag is handled separately and takes priority in the operator
 
 	// Show notice for --http-path with stdio transport
 	if transport == "stdio" && httpPath != "/mcp" {
@@ -378,13 +372,14 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 		},
 		Spec: mcpv1.MCPServerSpec{
 			Registry: &mcpv1.RegistryRef{
-				Name:   registryName,
-				Server: serverName,
+				RegistryName: registryName,
+				ServerName:   serverName,
 			},
 			Runtime: &mcpv1.RuntimeSpec{
 				Type:  runtimeType,
 				Image: image,
 				Env:   envMap,
+				Port:  port,
 			},
 			Transport: transportSpec,
 			Ports:     parsedPorts,
@@ -504,7 +499,7 @@ spec:
 		mcpServer.Annotations["mcp.allbeone.io/deployed-by"],
 		mcpServer.Annotations["mcp.allbeone.io/deployed-at"],
 		mcpServer.Spec.Registry.Registry,
-		mcpServer.Spec.Registry.Server,
+		mcpServer.Spec.Registry.ServerName,
 		mcpServer.Spec.Runtime.Type,
 	)
 
@@ -512,6 +507,9 @@ spec:
 	if mcpServer.Spec.Runtime.Image != "" {
 		fmt.Printf("\n    image: %s", mcpServer.Spec.Runtime.Image)
 	}
+
+	// Print port if present (including 0 for verification)
+	fmt.Printf("\n    port: %d", mcpServer.Spec.Runtime.Port)
 
 	// Print environment variables if present
 	if len(mcpServer.Spec.Runtime.Env) > 0 {
