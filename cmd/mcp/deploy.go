@@ -378,8 +378,8 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 		},
 		Spec: mcpv1.MCPServerSpec{
 			Registry: &mcpv1.RegistryRef{
-				Registry: registryName,
-				Server:   serverName,
+				Name:   registryName,
+				Server: serverName,
 			},
 			Runtime: &mcpv1.RuntimeSpec{
 				Type:  runtimeType,

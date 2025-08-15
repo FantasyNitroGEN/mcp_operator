@@ -261,6 +261,8 @@ jobs:
             --wait --timeout 300s
 
       - name: Validate status
+        id: validate
+        continue-on-error: true
         run: |
           set -e
 
@@ -302,7 +304,7 @@ jobs:
           kubectl -n mcp wait mcpserver/postgres --for=condition=Ready --timeout=180s || true
 
       - name: Dump diagnostics on failure
-        if: failure()
+        if: ${{ failure() || steps.validate.outcome == 'failure' }}
         run: |
           set -e
           echo "=== MCPServer (full) ==="
@@ -340,7 +342,7 @@ jobs:
           kubectl -n mcp get events --sort-by=.lastTimestamp > diag_events.txt || true
 
       - name: Upload diagnostics artifact
-        if: failure()
+        if: ${{ failure() || steps.validate.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
           name: e2e-kind-diagnostics

@@ -297,7 +297,17 @@ func (d *MCPServerDefaulter) setDefaults(mcpServer *mcpv1.MCPServer) {
 		mcpServer.Spec.Registry.Server = mcpServer.Name
 	}
 
-	// Default registry.registry to "default-registry" if empty
+	// Backward compatibility: copy Registry to Name if Name is empty and Registry is not empty
+	if mcpServer.Spec.Registry.Name == "" && mcpServer.Spec.Registry.Registry != "" {
+		mcpServer.Spec.Registry.Name = mcpServer.Spec.Registry.Registry
+	}
+
+	// Default registry.name to "default-registry" if empty
+	if mcpServer.Spec.Registry.Name == "" {
+		mcpServer.Spec.Registry.Name = "default-registry"
+	}
+
+	// Default registry.registry to "default-registry" if empty (for backward compatibility)
 	if mcpServer.Spec.Registry.Registry == "" {
 		mcpServer.Spec.Registry.Registry = "default-registry"
 	}

@@ -800,11 +800,14 @@ type IstioRetryPolicy struct {
 }
 
 type RegistryRef struct {
-	// Registry имя MCPRegistry (например, "default-registry")
-	Registry string `json:"registry"`
+	// Имя MCPRegistry-ресурса (должно существовать в ns). Нужно для поиска кэша.
+	Name string `json:"name"`
 
-	// Server имя сервера в реестре (например, "postgres")
-	Server string `json:"server"`
+	// Registry имя MCPRegistry (например, "default-registry") - алиас для обратной совместимости
+	Registry string `json:"registry,omitempty"`
+
+	// (Опционально) имя сервера в реестре; если пусто — берем metadata.name
+	Server string `json:"server,omitempty"`
 }
 
 // TransportSpec определяет тип транспорта для MCP сервера

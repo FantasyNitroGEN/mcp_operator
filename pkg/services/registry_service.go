@@ -391,12 +391,16 @@ func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, m
 	if mcpServer.Spec.Registry.Registry == "" {
 		return fmt.Errorf("registry name is required for cache enrichment")
 	}
-	if mcpServer.Spec.Registry.Server == "" {
-		return fmt.Errorf("server name is required for cache enrichment")
+
+	// Build ConfigMap name according to the specification
+	reg := mcpServer.Spec.Registry
+	server := reg.Server
+	if server == "" {
+		server = mcpServer.Name
 	}
 
 	// Find ConfigMap mcpregistry-<registryName>-<serverName>
-	configMapName := fmt.Sprintf("mcpregistry-%s-%s", mcpServer.Spec.Registry.Registry, mcpServer.Spec.Registry.Server)
+	configMapName := fmt.Sprintf("mcpregistry-%s-%s", reg.Registry, server)
 	configMap := &corev1.ConfigMap{}
 
 	// Use the provided namespace parameter instead of mcpServer.Namespace
