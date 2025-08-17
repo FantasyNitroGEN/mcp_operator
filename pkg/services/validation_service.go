@@ -186,25 +186,23 @@ func (v *DefaultValidationService) validateRegistryInfo(registry *mcpv1.Registry
 		return fmt.Errorf("registry information is required")
 	}
 
-	// Check for the new field structure (registryName and serverName)
-	hasNewFields := registry.RegistryName != "" || registry.ServerName != ""
+	// Check for the new field structure (registryName is the primary identifier)
+	hasNewFields := registry.RegistryName != ""
 	// Check for old field structure (name and server)
 	hasOldFields := registry.Name != "" || registry.Server != "" //nolint:staticcheck // Backward compatibility validation
 
 	if !hasNewFields && !hasOldFields {
-		return fmt.Errorf("registry name is required: either use registryName and serverName fields, or the deprecated name and server fields")
+		return fmt.Errorf("registry name is required: either use registryName field, or the deprecated name field")
 	}
 
 	// Validate new field structure
 	if hasNewFields {
-		if registry.ServerName == "" {
-			return fmt.Errorf("serverName is required when using new registry field structure")
-		}
-		if len(registry.ServerName) > 253 {
-			return fmt.Errorf("registry serverName cannot be longer than 253 characters")
-		}
-		if registry.RegistryName != "" && len(registry.RegistryName) > 253 {
+		// registryName is required, serverName is optional (can be defaulted from MCPServer name)
+		if len(registry.RegistryName) > 253 {
 			return fmt.Errorf("registry registryName cannot be longer than 253 characters")
+		}
+		if registry.ServerName != "" && len(registry.ServerName) > 253 {
+			return fmt.Errorf("registry serverName cannot be longer than 253 characters")
 		}
 	}
 

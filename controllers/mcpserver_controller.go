@@ -124,9 +124,13 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 		if mcpServer.Spec.Registry.ServerName != "" {
 			serverName = mcpServer.Spec.Registry.ServerName
-		} else {
+		} else if mcpServer.Spec.Registry.RegistryName == "" {
+			// Only use deprecated Server field if we're not using new field structure
 			//nolint:staticcheck
 			serverName = mcpServer.Spec.Registry.Server // fallback to deprecated Server field
+		} else {
+			// When using new field structure, default serverName to mcpServer name if empty
+			serverName = mcpServer.Name
 		}
 	}
 	logger = logger.WithValues(
