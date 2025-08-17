@@ -186,37 +186,22 @@ func (v *DefaultValidationService) validateRegistryInfo(registry *mcpv1.Registry
 		return fmt.Errorf("registry information is required")
 	}
 
-	// Check for the new field structure (registryName is the primary identifier)
-	hasNewFields := registry.RegistryName != ""
-	// Check for old field structure (name and server)
-	hasOldFields := registry.Name != "" || registry.Server != "" //nolint:staticcheck // Backward compatibility validation
+	// Check for current field structure - backward compatibility removed
+	hasRegistryName := registry.RegistryName != "" || registry.Registry != ""
 
-	if !hasNewFields && !hasOldFields {
-		return fmt.Errorf("registry name is required: either use registryName field, or the deprecated name field")
+	if !hasRegistryName {
+		return fmt.Errorf("registry name is required: use registryName field or registry field")
 	}
 
-	// Validate new field structure
-	if hasNewFields {
-		// registryName is required, serverName is optional (can be defaulted from MCPServer name)
-		if len(registry.RegistryName) > 253 {
-			return fmt.Errorf("registry registryName cannot be longer than 253 characters")
-		}
-		if registry.ServerName != "" && len(registry.ServerName) > 253 {
-			return fmt.Errorf("registry serverName cannot be longer than 253 characters")
-		}
+	// Validate current field structure only
+	if registry.RegistryName != "" && len(registry.RegistryName) > 253 {
+		return fmt.Errorf("registry registryName cannot be longer than 253 characters")
 	}
-
-	// Validate old field structure (for backward compatibility)
-	if hasOldFields && !hasNewFields {
-		if registry.Server == "" && registry.Name == "" { //nolint:staticcheck // Backward compatibility validation
-			return fmt.Errorf("registry name is required")
-		}
-		if registry.Server != "" && len(registry.Server) > 253 { //nolint:staticcheck // Backward compatibility validation
-			return fmt.Errorf("registry server name cannot be longer than 253 characters")
-		}
-		if registry.Name != "" && len(registry.Name) > 253 { //nolint:staticcheck // Backward compatibility validation
-			return fmt.Errorf("registry name cannot be longer than 253 characters")
-		}
+	if registry.Registry != "" && len(registry.Registry) > 253 {
+		return fmt.Errorf("registry registry field cannot be longer than 253 characters")
+	}
+	if registry.ServerName != "" && len(registry.ServerName) > 253 {
+		return fmt.Errorf("registry serverName cannot be longer than 253 characters")
 	}
 
 	return nil

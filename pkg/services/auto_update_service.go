@@ -239,20 +239,19 @@ func (s *DefaultAutoUpdateService) IsUpdateRequired(ctx context.Context, mcpServ
 		"registry", mcpServer.Spec.Registry.Registry,
 	)
 
-	// Skip if no registry is configured - check both new and deprecated fields
-	if mcpServer.Spec.Registry.RegistryName == "" && mcpServer.Spec.Registry.Registry == "" && mcpServer.Spec.Registry.Name == "" { //nolint:staticcheck
+	// Skip if no registry is configured - use current fields only
+	if mcpServer.Spec.Registry.RegistryName == "" && mcpServer.Spec.Registry.Registry == "" {
 		return false, nil, nil
 	}
 
-	// Fetch latest server specification from registry - use new fields first, fallback to deprecated fields
+	// Fetch latest server specification from registry - use current fields only
 	registryName := mcpServer.Spec.Registry.RegistryName
 	if registryName == "" {
-		registryName = mcpServer.Spec.Registry.Registry // fallback to deprecated field
+		registryName = mcpServer.Spec.Registry.Registry
 	}
 	serverName := mcpServer.Spec.Registry.ServerName
 	if serverName == "" {
-		//nolint:staticcheck
-		serverName = mcpServer.Spec.Registry.Server // fallback to deprecated field
+		serverName = mcpServer.Name // default to MCPServer name
 	}
 	latestSpec, err := s.registryService.FetchServerSpec(ctx, registryName, serverName)
 	if err != nil {

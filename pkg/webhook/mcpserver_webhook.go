@@ -83,6 +83,11 @@ func (d *MCPServerDefaulter) Handle(ctx context.Context, req admission.Request) 
 func (v *MCPServerValidator) validateMCPServer(mcpServer *mcpv1.MCPServer) field.ErrorList {
 	var allErrs field.ErrorList
 
+	// Validate registry information
+	if errs := v.validateRegistryInfo(mcpServer); len(errs) > 0 {
+		allErrs = append(allErrs, errs...)
+	}
+
 	// Validate image security
 	if errs := v.validateImageSecurity(mcpServer); len(errs) > 0 {
 		allErrs = append(allErrs, errs...)
@@ -111,6 +116,33 @@ func (v *MCPServerValidator) validateMCPServer(mcpServer *mcpv1.MCPServer) field
 	return allErrs
 }
 
+func (v *MCPServerValidator) validateRegistryInfo(mcpServer *mcpv1.MCPServer) field.ErrorList {
+	var allErrs field.ErrorList
+	specPath := field.NewPath("spec")
+
+	registry := mcpServer.Spec.Registry
+	if registry == nil {
+		allErrs = append(allErrs, field.Required(specPath.Child("registry"), "registry information is required"))
+		return allErrs
+	}
+
+	// Validate current field structure - only RegistryName and ServerName
+	if registry.RegistryName == "" {
+		allErrs = append(allErrs, field.Required(specPath.Child("registry", "registryName"), "registry name is required"))
+		return allErrs
+	}
+
+	// registryName is required, serverName is optional (can be defaulted from MCPServer name)
+	if len(registry.RegistryName) > 253 {
+		allErrs = append(allErrs, field.Invalid(specPath.Child("registry", "registryName"), registry.RegistryName, "registry registryName cannot be longer than 253 characters"))
+	}
+	if registry.ServerName != "" && len(registry.ServerName) > 253 {
+		allErrs = append(allErrs, field.Invalid(specPath.Child("registry", "serverName"), registry.ServerName, "registry serverName cannot be longer than 253 characters"))
+	}
+
+	return allErrs
+}
+
 func (v *MCPServerValidator) validateImageSecurity(mcpServer *mcpv1.MCPServer) field.ErrorList {
 	var allErrs field.ErrorList
 	specPath := field.NewPath("spec")
@@ -121,9 +153,7 @@ func (v *MCPServerValidator) validateImageSecurity(mcpServer *mcpv1.MCPServer) f
 
 		// Check if registry is specified - if so, allow empty image
 		registrySpecified := mcpServer.Spec.Registry != nil &&
-			(mcpServer.Spec.Registry.RegistryName != "" ||
-				mcpServer.Spec.Registry.Name != "" || //nolint:staticcheck // Backward compatibility check
-				mcpServer.Spec.Registry.Registry != "")
+			mcpServer.Spec.Registry.RegistryName != ""
 
 		if image == "" {
 			if !registrySpecified {
@@ -308,31 +338,9 @@ func (d *MCPServerDefaulter) setDefaults(mcpServer *mcpv1.MCPServer) {
 		mcpServer.Spec.Registry.ServerName = mcpServer.Name
 	}
 
-	// Backward compatibility: copy Registry to RegistryName if RegistryName is empty and Registry is not empty
-	if mcpServer.Spec.Registry.RegistryName == "" && mcpServer.Spec.Registry.Registry != "" {
-		mcpServer.Spec.Registry.RegistryName = mcpServer.Spec.Registry.Registry
-	}
-
 	// Default registry.registryName to "default-registry" if empty
 	if mcpServer.Spec.Registry.RegistryName == "" {
 		mcpServer.Spec.Registry.RegistryName = "default-registry"
-	}
-
-	// Default registry.registry to "default-registry" if empty (for backward compatibility)
-	if mcpServer.Spec.Registry.Registry == "" {
-		mcpServer.Spec.Registry.Registry = "default-registry"
-	}
-
-	// Convert old spec.port to spec.ports if spec.ports is empty
-	if mcpServer.Spec.Port != nil && len(mcpServer.Spec.Ports) == 0 {
-		mcpServer.Spec.Ports = []mcpv1.PortSpec{
-			{
-				Name:       "http",
-				Port:       *mcpServer.Spec.Port,
-				TargetPort: *mcpServer.Spec.Port,
-				Protocol:   "TCP",
-			},
-		}
 	}
 
 	// Set defaults for each port in spec.ports

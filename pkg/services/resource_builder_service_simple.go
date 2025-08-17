@@ -334,10 +334,15 @@ func (r *SimpleResourceBuilderService) buildLabels(mcpServer *mcpv1.MCPServer) m
 		"app.kubernetes.io/managed-by": "mcp-operator",
 	}
 
-	// Add registry information
-	//nolint:staticcheck
-	if mcpServer.Spec.Registry.Server != "" {
-		labels["mcp.allbeone.io/server-name"] = mcpServer.Spec.Registry.Server
+	// Add registry information - use current fields only
+	if mcpServer.Spec.Registry != nil {
+		serverName := mcpServer.Spec.Registry.ServerName
+		if serverName == "" {
+			serverName = mcpServer.Name // default to MCPServer name
+		}
+		if serverName != "" {
+			labels["mcp.allbeone.io/server-name"] = serverName
+		}
 	}
 	// Version is stored in annotations, get it from there if needed
 	if mcpServer.Annotations != nil && mcpServer.Annotations["mcp.allbeone.io/registry-version"] != "" {

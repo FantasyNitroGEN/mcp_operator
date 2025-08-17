@@ -168,12 +168,8 @@ func (r *DefaultRegistryService) EnrichMCPServer(ctx context.Context, mcpServer 
 		return nil
 	}
 
-	// Fetch server specification - use ServerName first, fallback to deprecated Server field
+	// Fetch server specification - use ServerName field only
 	serverName := mcpServer.Spec.Registry.ServerName
-	if serverName == "" {
-		//nolint:staticcheck
-		serverName = mcpServer.Spec.Registry.Server // fallback to deprecated field
-	}
 	spec, err := r.FetchServerSpec(ctx, registryName, serverName)
 	if err != nil {
 		return fmt.Errorf("failed to fetch server spec for enrichment: %w", err)
@@ -246,12 +242,8 @@ func (r *DefaultRegistryService) ForceEnrichMCPServer(ctx context.Context, mcpSe
 		mcpServer.Annotations = make(map[string]string)
 	}
 
-	// Fetch server specification (always fetch, no skip check) - use ServerName first, fallback to deprecated Server field
+	// Fetch server specification (always fetch, no skip check) - use ServerName field only
 	serverName := mcpServer.Spec.Registry.ServerName
-	if serverName == "" {
-		//nolint:staticcheck
-		serverName = mcpServer.Spec.Registry.Server // fallback to deprecated field
-	}
 	spec, err := r.FetchServerSpec(ctx, registryName, serverName)
 	if err != nil {
 		return fmt.Errorf("failed to fetch server spec for force enrichment: %w", err)

@@ -112,24 +112,17 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Add MCPServer details to logger context
 	var registryName, serverName string
 	if mcpServer.Spec.Registry != nil {
-		// Use new fields first, fall back to deprecated fields for backward compatibility
+		// Use current fields only - backward compatibility removed
 		if mcpServer.Spec.Registry.RegistryName != "" {
 			registryName = mcpServer.Spec.Registry.RegistryName
 		} else if mcpServer.Spec.Registry.Registry != "" {
 			registryName = mcpServer.Spec.Registry.Registry
-		} else {
-			//nolint:staticcheck
-			registryName = mcpServer.Spec.Registry.Name // fallback to deprecated Name field
 		}
 
 		if mcpServer.Spec.Registry.ServerName != "" {
 			serverName = mcpServer.Spec.Registry.ServerName
-		} else if mcpServer.Spec.Registry.RegistryName == "" {
-			// Only use deprecated Server field if we're not using new field structure
-			//nolint:staticcheck
-			serverName = mcpServer.Spec.Registry.Server // fallback to deprecated Server field
 		} else {
-			// When using new field structure, default serverName to mcpServer name if empty
+			// Default serverName to mcpServer name if empty
 			serverName = mcpServer.Name
 		}
 	}
@@ -551,8 +544,17 @@ func (r *MCPServerReconciler) handleDeletion(ctx context.Context, logger logr.Lo
 		cacheKey := fmt.Sprintf("mcpserver:%s:%s", mcpServer.Namespace, mcpServer.Name)
 		r.CacheService.InvalidateMCPServer(ctx, cacheKey)
 		// Also invalidate registry servers cache since server is being deleted
-		if mcpServer.Spec.Registry.Server != "" { //nolint:staticcheck
-			r.CacheService.InvalidateRegistryServers(ctx, mcpServer.Spec.Registry.Server) //nolint:staticcheck
+		if mcpServer.Spec.Registry != nil {
+			var registryName string
+			// Use current fields only - backward compatibility removed
+			if mcpServer.Spec.Registry.RegistryName != "" {
+				registryName = mcpServer.Spec.Registry.RegistryName
+			} else if mcpServer.Spec.Registry.Registry != "" {
+				registryName = mcpServer.Spec.Registry.Registry
+			}
+			if registryName != "" {
+				r.CacheService.InvalidateRegistryServers(ctx, registryName)
+			}
 		}
 		logger.V(1).Info("Invalidated cache entries for deleted MCPServer", "cacheKey", cacheKey)
 	}
@@ -658,15 +660,32 @@ func (r *MCPServerReconciler) findMCPServersForConfigMap(ctx context.Context, co
 	}
 
 	for _, mcpServer := range mcpServerList.Items {
-		if mcpServer.Spec.Registry != nil &&
-			mcpServer.Spec.Registry.Registry == registryName &&
-			mcpServer.Spec.Registry.Server == serverName { //nolint:staticcheck
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      mcpServer.Name,
-					Namespace: mcpServer.Namespace,
-				},
-			})
+		if mcpServer.Spec.Registry != nil {
+			// Resolve registry name using current fields only
+			var mcpRegistryName, mcpServerName string
+
+			// Use current fields only - backward compatibility removed
+			if mcpServer.Spec.Registry.RegistryName != "" {
+				mcpRegistryName = mcpServer.Spec.Registry.RegistryName
+			} else if mcpServer.Spec.Registry.Registry != "" {
+				mcpRegistryName = mcpServer.Spec.Registry.Registry
+			}
+
+			if mcpServer.Spec.Registry.ServerName != "" {
+				mcpServerName = mcpServer.Spec.Registry.ServerName
+			} else {
+				// Default serverName to mcpServer name if empty
+				mcpServerName = mcpServer.Name
+			}
+
+			if mcpRegistryName == registryName && mcpServerName == serverName {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      mcpServer.Name,
+						Namespace: mcpServer.Namespace,
+					},
+				})
+			}
 		}
 	}
 
@@ -768,9 +787,26 @@ func (r *MCPServerReconciler) applyRenderedResources(ctx context.Context, logger
 		}
 		labels["mcp.allbeone.io/name"] = mcpServer.Name
 		if mcpServer.Spec.Registry != nil {
-			labels["mcp.allbeone.io/registry"] = mcpServer.Spec.Registry.Registry
-			//nolint:staticcheck
-			labels["mcp.allbeone.io/server"] = mcpServer.Spec.Registry.Server
+			// Use current fields only - backward compatibility removed
+			var registryName, serverName string
+			if mcpServer.Spec.Registry.RegistryName != "" {
+				registryName = mcpServer.Spec.Registry.RegistryName
+			} else if mcpServer.Spec.Registry.Registry != "" {
+				registryName = mcpServer.Spec.Registry.Registry
+			}
+
+			if mcpServer.Spec.Registry.ServerName != "" {
+				serverName = mcpServer.Spec.Registry.ServerName
+			} else {
+				serverName = mcpServer.Name
+			}
+
+			if registryName != "" {
+				labels["mcp.allbeone.io/registry"] = registryName
+			}
+			if serverName != "" {
+				labels["mcp.allbeone.io/server"] = serverName
+			}
 		}
 		labels["mcp.allbeone.io/hash"] = renderedHash
 		resource.SetLabels(labels)
