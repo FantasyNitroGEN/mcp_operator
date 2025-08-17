@@ -740,6 +740,21 @@
       "items": {
         "type": "object"
       }
+    },
+    "istio": {
+      "type": "object",
+      "description": "Istio integration configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable Istio integration for the operator"
+        },
+        "autoDetect": {
+          "type": "boolean",
+          "description": "Auto-detect Istio availability"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": ["operator"],

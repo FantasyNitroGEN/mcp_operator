@@ -104,6 +104,7 @@ operator:
     capabilities:
       drop:
       - ALL
+      add: []
 
   # Resource requirements
   # Recommended configurations based on cluster size:
@@ -149,6 +150,9 @@ operator:
       port: 8081
     initialDelaySeconds: 15
     periodSeconds: 20
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
 
   # Readiness probe configuration
   readinessProbe:
@@ -157,6 +161,9 @@ operator:
       port: 8081
     initialDelaySeconds: 5
     periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
 
   # Resource optimization configuration
   optimization:
@@ -282,7 +289,7 @@ priorityClassName: ""
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
-  # maxUnavailable: 1
+  maxUnavailable: 1
 
 # Network policy
 networkPolicy:

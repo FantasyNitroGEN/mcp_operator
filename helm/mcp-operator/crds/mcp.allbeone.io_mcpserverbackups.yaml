@@ -2297,15 +2297,26 @@ spec:
                         description: Registry содержит информацию о сервере из MCP
                           Registry
                         properties:
+                          name:
+                            description: 'Deprecated: use RegistryName instead. Имя
+                              MCPRegistry-ресурса (должно существовать в ns). Нужно
+                              для поиска кэша.'
+                            type: string
                           registry:
                             description: Registry имя MCPRegistry (например, "default-registry")
+                              - алиас для обратной совместимости
+                            type: string
+                          registryName:
+                            description: RegistryName название MCPRegistry в том же
+                              namespace
                             type: string
                           server:
-                            description: Server имя сервера в реестре (например, "postgres")
+                            description: 'Deprecated: use ServerName instead. (Опционально)
+                              имя сервера в реестре; если пусто — берем metadata.name'
                             type: string
-                        required:
-                        - registry
-                        - server
+                          serverName:
+                            description: ServerName имя сервера в реестре
+                            type: string
                         type: object
                       replicas:
                         description: Replicas определяет количество реплик сервера
