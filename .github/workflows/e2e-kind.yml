@@ -132,8 +132,6 @@ jobs:
               --set registry.source.repo=docker/mcp-registry \
               --set registry.source.branch=main \
               --set registry.source.path=servers \
-              --set image.repository="${OP_REPO}" \
-              --set image.tag="${OP_TAG}"
           else
             helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
             helm repo update
@@ -145,11 +143,12 @@ jobs:
               --set registry.source.repo=docker/mcp-registry \
               --set registry.source.branch=main \
               --set registry.source.path=servers \
-              --set image.repository="${OP_REPO}" \
-              --set image.tag="${OP_TAG}"
           fi
 
-          # ждём раскатку
+          # выставляем нужный образ по SHA и ждём раскатку
+          CTN="$(kubectl -n mcp get deploy mcp-operator -o jsonpath='{.spec.template.spec.containers[0].name}')"
+          OP_IMG="${OP_REPO}:${OP_TAG}"
+          kubectl -n mcp set image deploy/mcp-operator "${CTN}=${OP_IMG}" --record
           kubectl -n mcp rollout status deploy/mcp-operator --timeout=300s
 
       - name: MCPRegistry spec is github source (no url)
