@@ -131,7 +131,7 @@ jobs:
               --set registry.source.type=github \
               --set registry.source.repo=docker/mcp-registry \
               --set registry.source.branch=main \
-              --set registry.source.path=servers \
+              --set registry.source.path=servers
           else
             helm repo add mcp-operator https://fantasynitrogen.github.io/mcp_operator/
             helm repo update
@@ -142,7 +142,7 @@ jobs:
               --set registry.source.type=github \
               --set registry.source.repo=docker/mcp-registry \
               --set registry.source.branch=main \
-              --set registry.source.path=servers \
+              --set registry.source.path=servers
           fi
 
           # выставляем нужный образ по SHA и ждём раскатку

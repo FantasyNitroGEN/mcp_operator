@@ -4,6 +4,16 @@
   "title": "MCP Operator Helm Chart Values Schema",
   "description": "JSON Schema for validating MCP Operator Helm chart values",
   "properties": {
+    "image": {
+      "type": "object",
+      "description": "Operator container image settings",
+      "properties": {
+        "repository": { "type": "string", "default": "ghcr.io/fantasynitrogen/mcp_operator" },
+        "tag":        { "type": "string", "default": "" },
+        "pullPolicy": { "type": "string", "enum": ["Always","IfNotPresent","Never"], "default": "IfNotPresent" }
+      },
+      "additionalProperties": false
+    },
     "controller": {
       "type": "object",
       "description": "Controller configuration",
