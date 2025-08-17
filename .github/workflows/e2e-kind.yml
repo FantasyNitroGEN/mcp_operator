@@ -352,89 +352,71 @@ jobs:
             --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}' \
             --wait --timeout 300s
 
-      - name: Validate status
-        id: validate
-        continue-on-error: true
+      - name: Validate & dump on failure (single step)
         run: |
-          set -e
-
+          set +e
           echo "== MCPServer list =="
           kubectl -n mcp get mcpservers -o wide || true
-
+          echo "== MCPServer spec (debug) =="
+          kubectl -n mcp get mcpserver postgres -o json | jq '.spec' || true
           echo "== MCPServer conditions =="
           kubectl -n mcp get mcpserver postgres -o jsonpath='{.status.conditions}' || true
           echo
-
           echo "== Rendered spec reference (status) =="
           kubectl -n mcp get mcpserver postgres -o jsonpath='{.status.resolvedConfigMap.name}{"\n"}{.status.resolvedHash}{"\n"}' 2>/dev/null || true
           echo
-
           CM_NAME="$(kubectl -n mcp get mcpserver postgres -o jsonpath='{.status.resolvedConfigMap.name}' 2>/dev/null || true)"
           if [ -n "$CM_NAME" ]; then
             echo "== Rendered ConfigMap: $CM_NAME =="
             kubectl -n mcp get cm "$CM_NAME" -o yaml || true
-
-            WANT_HASH="$(kubectl -n mcp get mcpserver postgres -o jsonpath='{.status.resolvedHash}' 2>/dev/null || true)"
-            HAVE_HASH="$(kubectl -n mcp get cm "$CM_NAME" -o jsonpath='{.data.manifests\.yaml}' | sha256sum | awk '{print $1}')"
-            echo "Resolved hash (status): ${WANT_HASH:-<empty>}"
-            echo "Resolved hash (cm):     ${HAVE_HASH:-<empty>}"
-            if [ -n "$WANT_HASH" ] && [ -n "$HAVE_HASH" ] && [ "$WANT_HASH" != "$HAVE_HASH" ]; then
-              echo "::warning::resolvedHash mismatch between MCPServer.status and ConfigMap data"
-            fi
-
-            echo "== Rendered manifests (preview) =="
-            kubectl -n mcp get cm "$CM_NAME" -o jsonpath='{.data.manifests\.yaml}' | head -c 2000 || true
-            echo
           else
             echo "::notice::MCPServer.status.resolvedConfigMap is empty (rendered spec not published by operator)"
           fi
-
           echo "== Workload (by instance label) =="
           kubectl -n mcp get deploy,po,svc -l app.kubernetes.io/instance=postgres || true
-
           echo "== Wait MCPServer Ready =="
-          kubectl -n mcp wait mcpserver/postgres --for=condition=Ready --timeout=180s || true
+          kubectl -n mcp wait mcpserver/postgres --for=condition=Ready --timeout=180s
+          RC=$?
+          if [ $RC -ne 0 ]; then
+            echo "### Collecting diagnostics..."
+            echo "=== MCPServer (full) ==="
+            kubectl -n mcp get mcpserver postgres -o yaml || true
 
-      - name: Dump diagnostics on failure
-        if: ${{ always() }}
-        run: |
-          set -e
-          echo "=== MCPServer (full) ==="
-          kubectl -n mcp get mcpserver postgres -o yaml || true
+            echo "=== All resources in ns mcp ==="
+            kubectl -n mcp get all -o wide || true
 
-          echo "=== All resources in ns mcp ==="
-          kubectl -n mcp get all -o wide || true
+            echo "=== Workload by labels ==="
+            kubectl -n mcp get deploy,po,svc,cm,secret -l app.kubernetes.io/instance=postgres -o yaml || true
+            kubectl -n mcp get deploy,po,svc,cm,secret -l mcp.allbeone.io/name=postgres -o yaml || true
 
-          echo "=== Workload by labels ==="
-          kubectl -n mcp get deploy,po,svc,cm,secret -l app.kubernetes.io/instance=postgres -o yaml || true
-          kubectl -n mcp get deploy,po,svc,cm,secret -l mcp.allbeone.io/name=postgres -o yaml || true
+            echo "=== Operator logs (last 10m, current & previous) ==="
+            OP_POD="$(kubectl -n mcp get pod -l app.kubernetes.io/name=mcp-operator -o name | head -n1 | cut -d/ -f2)"
+            if [ -n "$OP_POD" ]; then
+              kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 || true
+              echo "--- previous:"
+              kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 --previous || true
+            fi
 
-          echo "=== Operator logs (last 10m, current & previous) ==="
-          OP_POD="$(kubectl -n mcp get pod -l app.kubernetes.io/name=mcp-operator -o name | head -n1 | cut -d/ -f2)"
-          if [ -n "$OP_POD" ]; then
-            kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 || true
-            echo "--- previous:"
-            kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 --previous || true
+            echo "=== Recent events ==="
+            kubectl -n mcp get events --sort-by=.lastTimestamp | tail -n 200 || true
+
+            echo "=== Describe deployment/operator ==="
+            kubectl -n mcp describe deploy mcp-operator || true
+
+            echo "=== Describe workload (if present) ==="
+            kubectl -n mcp describe deploy -l app.kubernetes.io/instance=postgres || true
+            kubectl -n mcp describe po -l app.kubernetes.io/instance=postgres || true
+
+            # save files for artifacts
+            kubectl -n mcp get mcpserver postgres -o yaml > diag_mcpserver.yaml || true
+            kubectl -n mcp get all -o yaml > diag_all.yaml || true
+            [ -n "$OP_POD" ] && kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 > diag_operator_logs.txt || true
+            kubectl -n mcp get events --sort-by=.lastTimestamp > diag_events.txt || true
           fi
-
-          echo "=== Recent events ==="
-          kubectl -n mcp get events --sort-by=.lastTimestamp | tail -n 200 || true
-
-          echo "=== Describe deployment/operator ==="
-          kubectl -n mcp describe deploy mcp-operator || true
-
-          echo "=== Describe workload (if present) ==="
-          kubectl -n mcp describe deploy -l app.kubernetes.io/instance=postgres || true
-          kubectl -n mcp describe po -l app.kubernetes.io/instance=postgres || true
-
-          # Сохраним в файлы для артефакта
-          kubectl -n mcp get mcpserver postgres -o yaml > diag_mcpserver.yaml || true
-          kubectl -n mcp get all -o yaml > diag_all.yaml || true
-          [ -n "$OP_POD" ] && kubectl -n mcp logs "$OP_POD" --since=10m --tail=-1 > diag_operator_logs.txt || true
-          kubectl -n mcp get events --sort-by=.lastTimestamp > diag_events.txt || true
+          exit $RC
 
       - name: Upload diagnostics artifact
-        if: ${{ always() }}
+        if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
           name: e2e-kind-diagnostics
