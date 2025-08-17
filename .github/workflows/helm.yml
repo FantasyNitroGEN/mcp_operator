@@ -32,9 +32,10 @@ jobs:
           fetch-depth: 0
       - name: Debug refs
         run: |
-          echo "event: $GITHUB_EVENT_NAME"
-          echo "job sha: $GITHUB_SHA"
-          echo "trigger sha: ${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "event:        $GITHUB_EVENT_NAME"
+          echo "job sha:      $GITHUB_SHA"
+          echo "trigger sha:  ${{ github.event.workflow_run.head_sha }}"
+          echo "trigger br:   ${{ github.event.workflow_run.head_branch }}"
 
       - name: Setup Go (for controller-gen)
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
@@ -69,9 +70,10 @@ jobs:
           fetch-depth: 0
       - name: Debug refs
         run: |
-          echo "event: $GITHUB_EVENT_NAME"
-          echo "job sha: $GITHUB_SHA"
-          echo "trigger sha: ${{ github.event.workflow_run.head_sha || github.sha }}
+          echo "event:        $GITHUB_EVENT_NAME"
+          echo "job sha:      $GITHUB_SHA"
+          echo "trigger sha:  ${{ github.event.workflow_run.head_sha }}"
+          echo "trigger br:   ${{ github.event.workflow_run.head_branch }}"
 
       - name: Setup Go (for controller-gen)
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
@@ -101,9 +103,10 @@ jobs:
           fetch-depth: 0
       - name: Debug refs
         run: |
-          echo "event: $GITHUB_EVENT_NAME"
-          echo "job sha: $GITHUB_SHA"
-          echo "trigger sha: ${{ github.event.workflow_run.head_sha || github.sha }}
+          echo "event:        $GITHUB_EVENT_NAME"
+          echo "job sha:      $GITHUB_SHA"
+          echo "trigger sha:  ${{ github.event.workflow_run.head_sha }}"
+          echo "trigger br:   ${{ github.event.workflow_run.head_branch }}"
 
       - name: Setup Go (for controller-gen)
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
