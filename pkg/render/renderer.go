@@ -54,17 +54,27 @@ func (r *DefaultRendererService) RenderResources(mcpServer *mcpv1.MCPServer) ([]
 		yamlDocs = append(yamlDocs, yamlDoc)
 	}
 
-	// 2. Service (always created)
-	service := r.resourceBuilder.BuildService(mcpServer)
-	if service != nil {
-		r.AddRequiredLabels(service, mcpServer)
-		resources = append(resources, service)
-
-		yamlDoc, err := r.objectToYAML(service)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to serialize service to YAML: %w", err)
+	// 2. Service (conditional creation based on transport type and gateway settings)
+	// Skip Service creation if transport.type==stdio and gateway.enabled!=true
+	shouldSkipService := false
+	if mcpServer.Spec.Transport != nil && mcpServer.Spec.Transport.Type == "stdio" {
+		if mcpServer.Spec.Gateway == nil || !mcpServer.Spec.Gateway.Enabled {
+			shouldSkipService = true
 		}
-		yamlDocs = append(yamlDocs, yamlDoc)
+	}
+
+	if !shouldSkipService {
+		service := r.resourceBuilder.BuildService(mcpServer)
+		if service != nil {
+			r.AddRequiredLabels(service, mcpServer)
+			resources = append(resources, service)
+
+			yamlDoc, err := r.objectToYAML(service)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to serialize service to YAML: %w", err)
+			}
+			yamlDocs = append(yamlDocs, yamlDoc)
+		}
 	}
 
 	// 3. ConfigMap (if needed)
@@ -138,34 +148,30 @@ func (r *DefaultRendererService) RenderResources(mcpServer *mcpv1.MCPServer) ([]
 		}
 	}
 
-	// 6. Istio VirtualService (if Istio is enabled and configured)
-	if mcpServer.Spec.Istio != nil && mcpServer.Spec.Istio.Enabled && mcpServer.Spec.Istio.VirtualService != nil {
-		virtualService := r.resourceBuilder.BuildVirtualService(mcpServer)
-		if virtualService != nil {
-			r.AddRequiredLabels(virtualService, mcpServer)
-			resources = append(resources, virtualService)
+	// 6. Istio VirtualService (if gateway.istio is enabled)
+	virtualService := r.resourceBuilder.BuildVirtualService(mcpServer)
+	if virtualService != nil {
+		r.AddRequiredLabels(virtualService, mcpServer)
+		resources = append(resources, virtualService)
 
-			yamlDoc, err := r.objectToYAML(virtualService)
-			if err != nil {
-				return nil, "", fmt.Errorf("failed to serialize VirtualService to YAML: %w", err)
-			}
-			yamlDocs = append(yamlDocs, yamlDoc)
+		yamlDoc, err := r.objectToYAML(virtualService)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to serialize VirtualService to YAML: %w", err)
 		}
+		yamlDocs = append(yamlDocs, yamlDoc)
 	}
 
-	// 7. Istio DestinationRule (if Istio is enabled and configured)
-	if mcpServer.Spec.Istio != nil && mcpServer.Spec.Istio.Enabled && mcpServer.Spec.Istio.DestinationRule != nil {
-		destinationRule := r.resourceBuilder.BuildDestinationRule(mcpServer)
-		if destinationRule != nil {
-			r.AddRequiredLabels(destinationRule, mcpServer)
-			resources = append(resources, destinationRule)
+	// 7. Istio DestinationRule (if gateway.istio is enabled - optional)
+	destinationRule := r.resourceBuilder.BuildDestinationRule(mcpServer)
+	if destinationRule != nil {
+		r.AddRequiredLabels(destinationRule, mcpServer)
+		resources = append(resources, destinationRule)
 
-			yamlDoc, err := r.objectToYAML(destinationRule)
-			if err != nil {
-				return nil, "", fmt.Errorf("failed to serialize DestinationRule to YAML: %w", err)
-			}
-			yamlDocs = append(yamlDocs, yamlDoc)
+		yamlDoc, err := r.objectToYAML(destinationRule)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to serialize DestinationRule to YAML: %w", err)
 		}
+		yamlDocs = append(yamlDocs, yamlDoc)
 	}
 
 	// Join all YAML documents with separator
@@ -183,7 +189,7 @@ func (r *DefaultRendererService) AddRequiredLabels(obj client.Object, mcpServer 
 
 	// Add required labels from the issue description
 	labels["mcp.allbeone.io/name"] = mcpServer.Name
-	labels["mcp.allbeone.io/registry"] = mcpServer.Spec.Registry.RegistryName
+	labels["mcp.allbeone.io/registry"] = mcpServer.Spec.Registry.Registry
 	labels["mcp.allbeone.io/server"] = mcpServer.Spec.Registry.ServerName
 
 	obj.SetLabels(labels)

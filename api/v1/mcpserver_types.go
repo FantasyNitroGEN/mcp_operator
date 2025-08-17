@@ -799,13 +799,112 @@ type IstioRetryPolicy struct {
 	RetryOn string `json:"retryOn,omitempty"`
 }
 
+type RegistryRef struct {
+	// Deprecated: use RegistryName instead. Имя MCPRegistry-ресурса (должно существовать в ns). Нужно для поиска кэша.
+	Name string `json:"name,omitempty"`
+
+	// RegistryName название MCPRegistry в том же namespace
+	RegistryName string `json:"registryName,omitempty"`
+
+	// ServerName имя сервера в реестре
+	ServerName string `json:"serverName,omitempty"`
+
+	// Registry имя MCPRegistry (например, "default-registry") - алиас для обратной совместимости
+	Registry string `json:"registry,omitempty"`
+
+	// Deprecated: use ServerName instead. (Опционально) имя сервера в реестре; если пусто — берем metadata.name
+	Server string `json:"server,omitempty"`
+}
+
+// TransportSpec определяет тип транспорта для MCP сервера
+type TransportSpec struct {
+	// Type тип транспорта
+	// +kubebuilder:validation:Enum=stdio;http;streamable-http
+	Type string `json:"type"`
+
+	// Path путь для подключения
+	Path string `json:"path,omitempty"`
+}
+
+// PortSpec определяет конфигурацию порта
+type PortSpec struct {
+	// Name имя порта
+	Name string `json:"name"`
+
+	// Port номер порта
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port"`
+
+	// TargetPort целевой порт контейнера
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	TargetPort int32 `json:"targetPort,omitempty"`
+
+	// Protocol протокол порта
+	// +kubebuilder:validation:Enum=TCP;UDP
+	// +kubebuilder:default=TCP
+	Protocol string `json:"protocol,omitempty"`
+
+	// AppProtocol протокол приложения
+	AppProtocol string `json:"appProtocol,omitempty"`
+}
+
+// GatewayIstioSpec определяет конфигурацию Istio для gateway
+type GatewayIstioSpec struct {
+	// Enabled включает интеграцию с Istio
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Host хост для внешнего доступа (например, mcp.localtest.me)
+	Host string `json:"host,omitempty"`
+
+	// GatewayRef ссылка на существующий Istio Gateway (например, istio-system/public-gateway)
+	GatewayRef string `json:"gatewayRef,omitempty"`
+}
+
+// GatewaySpec определяет конфигурацию gateway
+type GatewaySpec struct {
+	// Enabled включает gateway
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Image образ для gateway
+	Image string `json:"image,omitempty"`
+
+	// Port порт gateway
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port,omitempty"`
+
+	// Args аргументы для gateway
+	Args []string `json:"args,omitempty"`
+
+	// Env переменные окружения для gateway
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// Istio конфигурация интеграции с Istio для gateway
+	Istio *GatewayIstioSpec `json:"istio,omitempty"`
+}
+
+type RuntimeSpec struct {
+	Type    string   `json:"type,omitempty"`  // docker|stdio
+	Image   string   `json:"image,omitempty"` // требуется при docker
+	Command []string `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+
+	// Env переменные окружения для runtime
+	Env map[string]string `json:"env,omitempty"`
+
+	// Port порт для подключения к MCP серверу
+	Port int32 `json:"port,omitempty"`
+}
+
 // MCPServerSpec определяет желаемое состояние MCPServer
 type MCPServerSpec struct {
 	// Registry содержит информацию о сервере из MCP Registry
-	Registry MCPRegistryInfo `json:"registry"`
+	Registry *RegistryRef `json:"registry,omitempty"`
 
 	// Runtime определяет среду выполнения сервера
-	Runtime MCPRuntimeSpec `json:"runtime"`
+	Runtime *RuntimeSpec `json:"runtime,omitempty"`
 
 	// Config содержит конфигурацию сервера
 	Config *runtime.RawExtension `json:"config,omitempty"`
@@ -816,8 +915,11 @@ type MCPServerSpec struct {
 	// Resources определяет требования к ресурсам
 	Resources ResourceRequirements `json:"resources,omitempty"`
 
-	// Environment содержит переменные окружения
+	// Deprecated: use Env
 	Environment map[string]string `json:"environment,omitempty"`
+
+	// Env содержит переменные окружения
+	Env []corev1.EnvVar `json:"env,omitempty"`
 
 	// ServiceAccount для запуска подов
 	ServiceAccount string `json:"serviceAccount,omitempty"`
@@ -863,6 +965,21 @@ type MCPServerSpec struct {
 
 	// DeploymentStrategy конфигурация стратегии развертывания
 	DeploymentStrategy *DeploymentStrategySpec `json:"deploymentStrategy,omitempty"`
+
+	// Transport определяет тип транспорта для подключения к MCP серверу
+	Transport *TransportSpec `json:"transport,omitempty"`
+
+	// Ports определяет множественные порты для сервиса
+	Ports []PortSpec `json:"ports,omitempty"`
+
+	// Gateway конфигурация gateway для MCP сервера
+	Gateway *GatewaySpec `json:"gateway,omitempty"`
+
+	// Port устаревшее поле для обратной совместимости
+	// Deprecated: use Ports
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port *int32 `json:"port,omitempty"`
 
 	// Istio конфигурация интеграции с Istio service mesh
 	Istio *IstioSpec `json:"istio,omitempty"`
@@ -1026,6 +1143,12 @@ const (
 
 	// MCPServerConditionApplied конфигурация успешно применена
 	MCPServerConditionApplied MCPServerConditionType = "Applied"
+
+	// MCPServerConditionGatewayReady gateway готов или отключен
+	MCPServerConditionGatewayReady MCPServerConditionType = "GatewayReady"
+
+	// MCPServerConditionIstioConfigured Istio конфигурация создана при включенной опции
+	MCPServerConditionIstioConfigured MCPServerConditionType = "IstioConfigured"
 )
 
 //+kubebuilder:object:root=true
@@ -1039,6 +1162,8 @@ const (
 //+kubebuilder:printcolumn:name="RegistryFetched",type=string,JSONPath=".status.conditions[?(@.type=='RegistryFetched')].status"
 //+kubebuilder:printcolumn:name="Rendered",type=string,JSONPath=".status.conditions[?(@.type=='Rendered')].status"
 //+kubebuilder:printcolumn:name="Applied",type=string,JSONPath=".status.conditions[?(@.type=='Applied')].status"
+//+kubebuilder:printcolumn:name="GatewayReady",type=string,JSONPath=".status.conditions[?(@.type=='GatewayReady')].status"
+//+kubebuilder:printcolumn:name="IstioConfigured",type=string,JSONPath=".status.conditions[?(@.type=='IstioConfigured')].status"
 //+kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 
 // MCPServer is the Schema for the mcpservers API

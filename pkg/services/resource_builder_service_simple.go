@@ -133,8 +133,8 @@ func (r *SimpleResourceBuilderService) BuildConfigMap(mcpServer *mcpv1.MCPServer
 	}
 
 	// Add environment variables as config
-	for key, value := range mcpServer.Spec.Environment {
-		data[key] = value
+	for _, envVar := range mcpServer.Spec.Env {
+		data[envVar.Name] = envVar.Value
 	}
 
 	configMap := &corev1.ConfigMap{
@@ -334,12 +334,19 @@ func (r *SimpleResourceBuilderService) buildLabels(mcpServer *mcpv1.MCPServer) m
 		"app.kubernetes.io/managed-by": "mcp-operator",
 	}
 
-	// Add registry information
-	if mcpServer.Spec.Registry.Name != "" {
-		labels["mcp.allbeone.io/server-name"] = mcpServer.Spec.Registry.Name
+	// Add registry information - use current fields only
+	if mcpServer.Spec.Registry != nil {
+		serverName := mcpServer.Spec.Registry.ServerName
+		if serverName == "" {
+			serverName = mcpServer.Name // default to MCPServer name
+		}
+		if serverName != "" {
+			labels["mcp.allbeone.io/server-name"] = serverName
+		}
 	}
-	if mcpServer.Spec.Registry.Version != "" {
-		labels["mcp.allbeone.io/server-version"] = mcpServer.Spec.Registry.Version
+	// Version is stored in annotations, get it from there if needed
+	if mcpServer.Annotations != nil && mcpServer.Annotations["mcp.allbeone.io/registry-version"] != "" {
+		labels["mcp.allbeone.io/server-version"] = mcpServer.Annotations["mcp.allbeone.io/registry-version"]
 	}
 
 	// Add tenancy information
@@ -422,10 +429,10 @@ func (r *SimpleResourceBuilderService) buildEnvironmentVariables(mcpServer *mcpv
 	}
 
 	// Add general environment variables
-	for k, v := range mcpServer.Spec.Environment {
+	for _, envVar := range mcpServer.Spec.Env {
 		envVars = append(envVars, corev1.EnvVar{
-			Name:  k,
-			Value: v,
+			Name:  envVar.Name,
+			Value: envVar.Value,
 		})
 	}
 

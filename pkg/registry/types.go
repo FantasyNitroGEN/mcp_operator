@@ -25,7 +25,9 @@ type MCPServerSpec struct {
 	Config         ConfigSpec        `json:"config" yaml:"config"`
 	Capabilities   []string          `json:"capabilities" yaml:"capabilities"`
 	Environment    map[string]string `json:"environment" yaml:"environment"`
-	TemplateDigest string            `json:"template_digest,omitempty"` // SHA256 digest of raw server.yaml content
+	Transport      *TransportSpec    `json:"transport,omitempty" yaml:"transport,omitempty"` // Transport configuration
+	Ports          []PortSpec        `json:"ports,omitempty" yaml:"ports,omitempty"`         // Port configuration
+	TemplateDigest string            `json:"template_digest,omitempty"`                      // SHA256 digest of raw server.yaml content
 }
 
 // RuntimeSpec описывает среду выполнения MCP сервера
@@ -35,6 +37,21 @@ type RuntimeSpec struct {
 	Command []string          `json:"command" yaml:"command"` // Команда запуска
 	Args    []string          `json:"args" yaml:"args"`       // Аргументы команды
 	Env     map[string]string `json:"env" yaml:"env"`         // Переменные окружения
+}
+
+// TransportSpec определяет тип транспорта для MCP сервера
+type TransportSpec struct {
+	Type string `json:"type" yaml:"type"`                     // "stdio", "http", "streamable-http"
+	Path string `json:"path,omitempty" yaml:"path,omitempty"` // путь для подключения
+}
+
+// PortSpec определяет конфигурацию порта
+type PortSpec struct {
+	Name        string `json:"name" yaml:"name"`                                   // имя порта
+	Port        int32  `json:"port" yaml:"port"`                                   // номер порта
+	TargetPort  int32  `json:"targetPort,omitempty" yaml:"targetPort,omitempty"`   // целевой порт контейнера
+	Protocol    string `json:"protocol,omitempty" yaml:"protocol,omitempty"`       // протокол порта (TCP/UDP)
+	AppProtocol string `json:"appProtocol,omitempty" yaml:"appProtocol,omitempty"` // протокол приложения
 }
 
 // ConfigSpec описывает конфигурацию MCP сервера

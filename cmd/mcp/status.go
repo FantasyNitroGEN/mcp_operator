@@ -177,8 +177,8 @@ func printMCPServerStatusHuman(mcpServer *mcpv1.MCPServer) error {
 	fmt.Printf("Age: %s\n", formatDuration(age))
 
 	// Print registry info if available
-	if mcpServer.Spec.Registry.Name != "" {
-		fmt.Printf("Registry: %s\n", mcpServer.Spec.Registry.Name)
+	if mcpServer.Spec.Registry.Registry != "" {
+		fmt.Printf("Registry: %s\n", mcpServer.Spec.Registry.Registry)
 	}
 
 	// Print conditions

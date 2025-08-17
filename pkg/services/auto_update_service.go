@@ -82,7 +82,7 @@ func (s *DefaultAutoUpdateService) CheckForUpdates(ctx context.Context) error {
 	// Check each MCPServer for updates
 	for _, mcpServer := range mcpServerList.Items {
 		// Skip servers without registry configuration
-		if mcpServer.Spec.Registry.Name == "" {
+		if mcpServer.Spec.Registry == nil || mcpServer.Spec.Registry.Registry == "" {
 			continue
 		}
 
@@ -90,7 +90,7 @@ func (s *DefaultAutoUpdateService) CheckForUpdates(ctx context.Context) error {
 		serverLogger := logger.WithValues(
 			"mcpserver", mcpServer.Name,
 			"namespace", mcpServer.Namespace,
-			"registry", mcpServer.Spec.Registry.Name,
+			"registry", mcpServer.Spec.Registry.Registry,
 		)
 
 		// Check if server is in backoff period
@@ -117,8 +117,6 @@ func (s *DefaultAutoUpdateService) CheckForUpdates(ctx context.Context) error {
 		}
 
 		serverLogger.Info("Update required for MCPServer",
-			"current_version", mcpServer.Spec.Registry.Version,
-			"latest_version", latestSpec.Version,
 			"current_image", mcpServer.Spec.Runtime.Image,
 			"latest_image", latestSpec.Runtime.Image,
 		)
@@ -171,7 +169,7 @@ func (s *DefaultAutoUpdateService) UpdateServerFromTemplate(ctx context.Context,
 	logger := log.FromContext(ctx).WithValues(
 		"mcpserver", mcpServer.Name,
 		"namespace", mcpServer.Namespace,
-		"registry", mcpServer.Spec.Registry.Name,
+		"registry", mcpServer.Spec.Registry.Registry,
 	)
 
 	// Check if update is required
@@ -186,7 +184,7 @@ func (s *DefaultAutoUpdateService) UpdateServerFromTemplate(ctx context.Context,
 	}
 
 	// Store original values for comparison
-	originalVersion := mcpServer.Spec.Registry.Version
+	originalVersion := "" // RegistryRef doesn't have Version field
 	originalImage := mcpServer.Spec.Runtime.Image
 
 	// Update MCPServer with latest template data
@@ -238,16 +236,24 @@ func (s *DefaultAutoUpdateService) IsUpdateRequired(ctx context.Context, mcpServ
 	logger := log.FromContext(ctx).WithValues(
 		"mcpserver", mcpServer.Name,
 		"namespace", mcpServer.Namespace,
-		"registry", mcpServer.Spec.Registry.Name,
+		"registry", mcpServer.Spec.Registry.Registry,
 	)
 
-	// Skip if no registry is configured
-	if mcpServer.Spec.Registry.Name == "" {
+	// Skip if no registry is configured - use current fields only
+	if mcpServer.Spec.Registry.RegistryName == "" && mcpServer.Spec.Registry.Registry == "" {
 		return false, nil, nil
 	}
 
-	// Fetch latest server specification from registry
-	latestSpec, err := s.registryService.FetchServerSpec(ctx, mcpServer.Spec.Registry.Name, mcpServer.Spec.Registry.Name)
+	// Fetch latest server specification from registry - use current fields only
+	registryName := mcpServer.Spec.Registry.RegistryName
+	if registryName == "" {
+		registryName = mcpServer.Spec.Registry.Registry
+	}
+	serverName := mcpServer.Spec.Registry.ServerName
+	if serverName == "" {
+		serverName = mcpServer.Name // default to MCPServer name
+	}
+	latestSpec, err := s.registryService.FetchServerSpec(ctx, registryName, serverName)
 	if err != nil {
 		logger.Error(err, "Failed to fetch latest server specification")
 		return false, nil, fmt.Errorf("failed to fetch latest server specification: %w", err)
@@ -267,10 +273,14 @@ func (s *DefaultAutoUpdateService) IsUpdateRequired(ctx context.Context, mcpServ
 		return true, latestSpec, nil
 	}
 
-	// Compare versions
-	if mcpServer.Spec.Registry.Version != latestSpec.Version {
+	// Compare versions using annotations since RegistryRef doesn't have Version field
+	currentVersion := ""
+	if mcpServer.Annotations != nil {
+		currentVersion = mcpServer.Annotations["mcp.allbeone.io/registry-version"]
+	}
+	if currentVersion != latestSpec.Version {
 		logger.Info("Version mismatch detected",
-			"current_version", mcpServer.Spec.Registry.Version,
+			"current_version", currentVersion,
 			"latest_version", latestSpec.Version,
 		)
 		return true, latestSpec, nil
@@ -286,7 +296,7 @@ func (s *DefaultAutoUpdateService) IsUpdateRequired(ctx context.Context, mcpServ
 	}
 
 	// Compare other critical fields that might affect deployment
-	if !s.areRuntimeSpecsEqual(&mcpServer.Spec.Runtime, latestSpec.Runtime) {
+	if !s.areRuntimeSpecsEqual(mcpServer.Spec.Runtime, latestSpec.Runtime) {
 		logger.Info("Runtime specification mismatch detected")
 		return true, latestSpec, nil
 	}
@@ -336,14 +346,15 @@ func (s *DefaultAutoUpdateService) StopPeriodicSync() {
 
 // applyTemplateUpdates applies template updates to MCPServer
 func (s *DefaultAutoUpdateService) applyTemplateUpdates(mcpServer *mcpv1.MCPServer, latestSpec *registry.MCPServerSpec) {
-	// Update registry information
-	mcpServer.Spec.Registry.Version = latestSpec.Version
-	mcpServer.Spec.Registry.Description = latestSpec.Description
-	mcpServer.Spec.Registry.Repository = latestSpec.Repository
-	mcpServer.Spec.Registry.License = latestSpec.License
-	mcpServer.Spec.Registry.Author = latestSpec.Author
-	mcpServer.Spec.Registry.Keywords = latestSpec.Keywords
-	mcpServer.Spec.Registry.Capabilities = latestSpec.Capabilities
+	// Update registry metadata in annotations (since RegistryRef only has Registry and Server fields)
+	if mcpServer.Annotations == nil {
+		mcpServer.Annotations = make(map[string]string)
+	}
+	mcpServer.Annotations["mcp.allbeone.io/registry-version"] = latestSpec.Version
+	mcpServer.Annotations["mcp.allbeone.io/registry-description"] = latestSpec.Description
+	mcpServer.Annotations["mcp.allbeone.io/registry-repository"] = latestSpec.Repository
+	mcpServer.Annotations["mcp.allbeone.io/registry-license"] = latestSpec.License
+	mcpServer.Annotations["mcp.allbeone.io/registry-author"] = latestSpec.Author
 
 	// Update runtime information
 	mcpServer.Spec.Runtime.Type = latestSpec.Runtime.Type
@@ -368,8 +379,8 @@ func (s *DefaultAutoUpdateService) applyTemplateUpdates(mcpServer *mcpv1.MCPServ
 	}
 }
 
-// areRuntimeSpecsEqual compares mcpv1.MCPRuntimeSpec with registry.RuntimeSpec
-func (s *DefaultAutoUpdateService) areRuntimeSpecsEqual(current *mcpv1.MCPRuntimeSpec, latest registry.RuntimeSpec) bool {
+// areRuntimeSpecsEqual compares mcpv1.RuntimeSpec with registry.RuntimeSpec
+func (s *DefaultAutoUpdateService) areRuntimeSpecsEqual(current *mcpv1.RuntimeSpec, latest registry.RuntimeSpec) bool {
 	// Compare type
 	if current.Type != latest.Type {
 		return false

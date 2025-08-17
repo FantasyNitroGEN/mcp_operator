@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
+	"github.com/FantasyNitroGEN/mcp_operator/controllers/istio"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/metrics"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/render"
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/services"
@@ -53,6 +54,7 @@ type MCPServerReconciler struct {
 	AutoUpdateService services.AutoUpdateService
 	CacheService      services.CacheService
 	RendererService   render.RendererService
+	IstioController   *istio.Controller
 }
 
 // +kubebuilder:rbac:groups=mcp.allbeone.io,resources=mcpservers,verbs=get;list;watch;create;update;patch;delete
@@ -108,12 +110,28 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Add MCPServer details to logger context
+	var registryName, serverName string
+	if mcpServer.Spec.Registry != nil {
+		// Use current fields only - backward compatibility removed
+		if mcpServer.Spec.Registry.RegistryName != "" {
+			registryName = mcpServer.Spec.Registry.RegistryName
+		} else if mcpServer.Spec.Registry.Registry != "" {
+			registryName = mcpServer.Spec.Registry.Registry
+		}
+
+		if mcpServer.Spec.Registry.ServerName != "" {
+			serverName = mcpServer.Spec.Registry.ServerName
+		} else {
+			// Default serverName to mcpServer name if empty
+			serverName = mcpServer.Name
+		}
+	}
 	logger = logger.WithValues(
 		"generation", mcpServer.Generation,
 		"resource_version", mcpServer.ResourceVersion,
 		"current_phase", mcpServer.Status.Phase,
-		"registry_name", mcpServer.Spec.Registry.RegistryName,
-		"server_name", mcpServer.Spec.Registry.ServerName,
+		"registry_name", registryName,
+		"server_name", serverName,
 		"runtime_type", mcpServer.Spec.Runtime.Type,
 	)
 
@@ -127,10 +145,10 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	metrics.UpdateMCPServerInfo(
 		mcpServer.Namespace,
 		mcpServer.Name,
-		mcpServer.Spec.Registry.RegistryName,
+		registryName,
 		mcpServer.Spec.Runtime.Type,
 		mcpServer.Spec.Runtime.Image,
-		mcpServer.Spec.Registry.Version,
+		"", // Version field removed from RegistryRef
 	)
 
 	// Add finalizer if not present
@@ -150,23 +168,26 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Enrich MCPServer with registry data from cache if registry is specified (before validation)
-	if mcpServer.Spec.Registry.RegistryName != "" && mcpServer.Spec.Registry.ServerName != "" {
+	if registryName != "" && serverName != "" {
 		logger.Info("Enriching server from registry cache",
-			"registry_name", mcpServer.Spec.Registry.RegistryName,
-			"server_name", mcpServer.Spec.Registry.ServerName,
+			"registry_name", registryName,
+			"server_name", serverName,
 			"phase", "registry_cache_enrichment",
 		)
+
+		// Create a copy of the original MCPServer before enrichment for MergeFrom patch
+		orig := mcpServer.DeepCopy()
 
 		registryStartTime := time.Now()
 		if err := r.RegistryService.EnrichMCPServerFromCache(ctx, mcpServer, req.Namespace); err != nil {
 			logger.Error(err, "Failed to enrich MCPServer from registry cache",
-				"registry_name", mcpServer.Spec.Registry.RegistryName,
-				"server_name", mcpServer.Spec.Registry.ServerName,
+				"registry_name", registryName,
+				"server_name", serverName,
 				"phase", "registry_cache_enrichment",
 				"duration", time.Since(registryStartTime),
 				"error_type", "registry_cache_enrich_error",
 			)
-			metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.RegistryName, "error", time.Since(registryStartTime).Seconds())
+			metrics.RecordRegistryOperation(mcpServer.Namespace, registryName, "error", time.Since(registryStartTime).Seconds())
 			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRegistryFetched,
 				string(metav1.ConditionFalse), "CacheMissing", fmt.Sprintf("Registry cache missing: %v", err))
 			r.EventService.RecordWarning(mcpServer, "CacheMissing", fmt.Sprintf("Registry cache missing: %v", err))
@@ -179,19 +200,19 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		logger.Info("Successfully enriched server from registry cache",
-			"registry_name", mcpServer.Spec.Registry.RegistryName,
-			"server_name", mcpServer.Spec.Registry.ServerName,
+			"registry_name", registryName,
+			"server_name", serverName,
 			"phase", "registry_cache_enrichment",
 			"duration", time.Since(registryStartTime),
 		)
-		metrics.RecordRegistryOperation(mcpServer.Namespace, mcpServer.Spec.Registry.RegistryName, "success", time.Since(registryStartTime).Seconds())
+		metrics.RecordRegistryOperation(mcpServer.Namespace, registryName, "success", time.Since(registryStartTime).Seconds())
 		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRegistryFetched,
 			string(metav1.ConditionTrue), "RegistryFetched", "Successfully enriched from registry cache")
 		r.EventService.RecordNormal(mcpServer, "RegistryFetched", "Successfully enriched from registry cache")
 
-		// Update MCPServer with enriched data
-		if err := r.Update(ctx, mcpServer); err != nil {
-			logger.Error(err, "Failed to update MCPServer with enriched data")
+		// Patch MCPServer with enriched data using MergeFrom
+		if err := r.Patch(ctx, mcpServer, client.MergeFrom(orig)); err != nil {
+			logger.Error(err, "Failed to patch MCPServer with enriched data")
 			return ctrl.Result{}, err
 		}
 
@@ -200,14 +221,18 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			cacheKey := fmt.Sprintf("mcpserver:%s:%s", mcpServer.Namespace, mcpServer.Name)
 			r.CacheService.InvalidateMCPServer(ctx, cacheKey)
 			// Also invalidate registry servers cache since server was updated
-			if mcpServer.Spec.Registry.Name != "" {
-				r.CacheService.InvalidateRegistryServers(ctx, mcpServer.Spec.Registry.Name)
+			if registryName != "" {
+				r.CacheService.InvalidateRegistryServers(ctx, registryName)
 			}
 		}
 
 		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionRegistryFetched,
 			string(metav1.ConditionTrue), "RegistryEnrichmentSuccessful", "Successfully enriched MCPServer with registry data")
 		r.EventService.RecordNormal(mcpServer, "RegistryEnrichmentSuccessful", "Successfully enriched MCPServer with registry data")
+
+		// Requeue to process the enriched MCPServer
+		logger.Info("MCPServer enriched successfully, requeuing for processing")
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Validate MCPServer specification
@@ -372,6 +397,19 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		"duration", time.Since(applyStartTime),
 	)
 
+	// Handle Istio integration after successful resource application
+	if r.IstioController != nil {
+		logger.Info("Processing Istio integration")
+		if err := r.handleIstioIntegration(ctx, logger, mcpServer); err != nil {
+			logger.Error(err, "Failed to handle Istio integration",
+				"mcpserver", mcpServer.Name,
+				"namespace", mcpServer.Namespace)
+			// Don't fail the reconciliation for Istio errors, just log and continue
+			r.EventService.RecordWarning(mcpServer, "IstioIntegrationFailed",
+				fmt.Sprintf("Failed to configure Istio integration: %v", err))
+		}
+	}
+
 	// Check deployment status and update conditions with enhanced rolling update tracking
 	deployment, err := r.DeploymentService.GetDeploymentStatus(ctx, mcpServer)
 	if err != nil {
@@ -461,6 +499,23 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		metrics.RecordReconcileError(req.Namespace, "deployment_timeout", time.Since(startTime).Seconds())
 	}
 
+	// Set GatewayReady condition
+	if mcpServer.Spec.Gateway == nil || !mcpServer.Spec.Gateway.Enabled {
+		// Gateway is disabled, so it's considered "ready" (not required)
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionGatewayReady,
+			string(metav1.ConditionTrue), "GatewayDisabled", "Gateway is disabled")
+	} else {
+		// Gateway is enabled, check if service/port is ready
+		// We'll consider it ready if the deployment has ready replicas (container/port is ready)
+		if mcpServer.Status.ReadyReplicas > 0 {
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionGatewayReady,
+				string(metav1.ConditionTrue), "GatewayReady", "Gateway container and port are ready")
+		} else {
+			r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionGatewayReady,
+				string(metav1.ConditionFalse), "GatewayNotReady", "Gateway container/port is not ready")
+		}
+	}
+
 	// Final status update
 	if err := r.StatusService.UpdateMCPServerStatus(ctx, mcpServer); err != nil {
 		logger.Error(err, "Failed to update final MCPServer status")
@@ -489,8 +544,17 @@ func (r *MCPServerReconciler) handleDeletion(ctx context.Context, logger logr.Lo
 		cacheKey := fmt.Sprintf("mcpserver:%s:%s", mcpServer.Namespace, mcpServer.Name)
 		r.CacheService.InvalidateMCPServer(ctx, cacheKey)
 		// Also invalidate registry servers cache since server is being deleted
-		if mcpServer.Spec.Registry.Name != "" {
-			r.CacheService.InvalidateRegistryServers(ctx, mcpServer.Spec.Registry.Name)
+		if mcpServer.Spec.Registry != nil {
+			var registryName string
+			// Use current fields only - backward compatibility removed
+			if mcpServer.Spec.Registry.RegistryName != "" {
+				registryName = mcpServer.Spec.Registry.RegistryName
+			} else if mcpServer.Spec.Registry.Registry != "" {
+				registryName = mcpServer.Spec.Registry.Registry
+			}
+			if registryName != "" {
+				r.CacheService.InvalidateRegistryServers(ctx, registryName)
+			}
 		}
 		logger.V(1).Info("Invalidated cache entries for deleted MCPServer", "cacheKey", cacheKey)
 	}
@@ -499,6 +563,21 @@ func (r *MCPServerReconciler) handleDeletion(ctx context.Context, logger logr.Lo
 	mcpServer.Status.Phase = mcpv1.MCPServerPhaseTerminating
 	r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionProgressing,
 		string(metav1.ConditionTrue), "DeletionInProgress", "MCPServer deletion in progress")
+
+	// Clean up Istio resources first if Istio controller is available
+	if r.IstioController != nil {
+		logger.Info("Cleaning up Istio resources")
+		if err := r.IstioController.CleanupIstioResources(ctx, mcpServer); err != nil {
+			logger.Error(err, "Failed to clean up Istio resources",
+				"mcpserver", mcpServer.Name,
+				"namespace", mcpServer.Namespace)
+			// Don't fail deletion for Istio cleanup errors, just log and continue
+			r.EventService.RecordWarning(mcpServer, "IstioCleanupFailed",
+				fmt.Sprintf("Failed to clean up Istio resources: %v", err))
+		} else {
+			logger.Info("Successfully cleaned up Istio resources")
+		}
+	}
 
 	// Delete all associated resources
 	if err := r.DeploymentService.DeleteResources(ctx, mcpServer); err != nil {
@@ -581,14 +660,32 @@ func (r *MCPServerReconciler) findMCPServersForConfigMap(ctx context.Context, co
 	}
 
 	for _, mcpServer := range mcpServerList.Items {
-		if mcpServer.Spec.Registry.RegistryName == registryName &&
-			mcpServer.Spec.Registry.ServerName == serverName {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      mcpServer.Name,
-					Namespace: mcpServer.Namespace,
-				},
-			})
+		if mcpServer.Spec.Registry != nil {
+			// Resolve registry name using current fields only
+			var mcpRegistryName, mcpServerName string
+
+			// Use current fields only - backward compatibility removed
+			if mcpServer.Spec.Registry.RegistryName != "" {
+				mcpRegistryName = mcpServer.Spec.Registry.RegistryName
+			} else if mcpServer.Spec.Registry.Registry != "" {
+				mcpRegistryName = mcpServer.Spec.Registry.Registry
+			}
+
+			if mcpServer.Spec.Registry.ServerName != "" {
+				mcpServerName = mcpServer.Spec.Registry.ServerName
+			} else {
+				// Default serverName to mcpServer name if empty
+				mcpServerName = mcpServer.Name
+			}
+
+			if mcpRegistryName == registryName && mcpServerName == serverName {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name:      mcpServer.Name,
+						Namespace: mcpServer.Namespace,
+					},
+				})
+			}
 		}
 	}
 
@@ -642,7 +739,7 @@ func (r *MCPServerReconciler) GetMCPServerByNameIndexed(ctx context.Context, nam
 func (r *MCPServerReconciler) ListMCPServersByRegistryIndexed(ctx context.Context, registryName, namespace string) (*mcpv1.MCPServerList, error) {
 	mcpServerList := &mcpv1.MCPServerList{}
 	listOpts := []client.ListOption{
-		client.MatchingFields{"spec.registry.name": registryName},
+		client.MatchingFields{"spec.registry.registry": registryName},
 	}
 
 	if namespace != "" {
@@ -663,7 +760,7 @@ func (r *MCPServerReconciler) ListMCPServersEfficient(ctx context.Context, names
 
 	// Use indexed field if registry name is specified
 	if registryName != "" {
-		listOpts = append(listOpts, client.MatchingFields{"spec.registry.name": registryName})
+		listOpts = append(listOpts, client.MatchingFields{"spec.registry.registry": registryName})
 	}
 
 	if namespace != "" {
@@ -689,8 +786,28 @@ func (r *MCPServerReconciler) applyRenderedResources(ctx context.Context, logger
 			labels = make(map[string]string)
 		}
 		labels["mcp.allbeone.io/name"] = mcpServer.Name
-		labels["mcp.allbeone.io/registry"] = mcpServer.Spec.Registry.RegistryName
-		labels["mcp.allbeone.io/server"] = mcpServer.Spec.Registry.ServerName
+		if mcpServer.Spec.Registry != nil {
+			// Use current fields only - backward compatibility removed
+			var registryName, serverName string
+			if mcpServer.Spec.Registry.RegistryName != "" {
+				registryName = mcpServer.Spec.Registry.RegistryName
+			} else if mcpServer.Spec.Registry.Registry != "" {
+				registryName = mcpServer.Spec.Registry.Registry
+			}
+
+			if mcpServer.Spec.Registry.ServerName != "" {
+				serverName = mcpServer.Spec.Registry.ServerName
+			} else {
+				serverName = mcpServer.Name
+			}
+
+			if registryName != "" {
+				labels["mcp.allbeone.io/registry"] = registryName
+			}
+			if serverName != "" {
+				labels["mcp.allbeone.io/server"] = serverName
+			}
+		}
 		labels["mcp.allbeone.io/hash"] = renderedHash
 		resource.SetLabels(labels)
 
@@ -701,6 +818,14 @@ func (r *MCPServerReconciler) applyRenderedResources(ctx context.Context, logger
 		}
 		annotations["mcp.allbeone.io/rendered-cm"] = configMapName
 		resource.SetAnnotations(annotations)
+
+		// Add Istio annotations to deployment resources if Istio integration is enabled
+		if deployment, ok := resource.(*appsv1.Deployment); ok {
+			istio.AddIstioAnnotations(deployment, mcpServer)
+			logger.V(1).Info("Added Istio annotations to deployment",
+				"deployment", deployment.Name,
+				"namespace", deployment.Namespace)
+		}
 
 		// Set owner reference for proper cleanup
 		if err := controllerutil.SetControllerReference(mcpServer, resource, r.Scheme); err != nil {
@@ -782,4 +907,44 @@ func (r *MCPServerReconciler) isDeploymentRollingUpdate(deployment *appsv1.Deplo
 	}
 
 	return false
+}
+
+// handleIstioIntegration manages Istio resources for the MCPServer
+func (r *MCPServerReconciler) handleIstioIntegration(ctx context.Context, logger logr.Logger, mcpServer *mcpv1.MCPServer) error {
+	// Check if Istio integration is enabled
+	if mcpServer.Spec.Gateway == nil || mcpServer.Spec.Gateway.Istio == nil || !mcpServer.Spec.Gateway.Istio.Enabled {
+		// Istio integration is disabled, set condition to True (not required)
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionIstioConfigured,
+			string(metav1.ConditionTrue), "IstioDisabled", "Istio integration is disabled")
+		return nil
+	}
+
+	// Get the service name and port for VirtualService configuration
+	serviceName := mcpServer.Name
+	servicePort := int32(8080) // Default port
+
+	// Try to get the actual service port from the gateway or runtime configuration
+	if mcpServer.Spec.Gateway != nil && mcpServer.Spec.Gateway.Port > 0 {
+		servicePort = mcpServer.Spec.Gateway.Port
+	} else if mcpServer.Spec.Runtime != nil && mcpServer.Spec.Runtime.Port > 0 {
+		servicePort = mcpServer.Spec.Runtime.Port
+	}
+
+	logger.Info("Handling Istio integration",
+		"serviceName", serviceName,
+		"servicePort", servicePort)
+
+	// Use the Istio controller to reconcile Istio resources
+	if err := r.IstioController.ReconcileIstioResources(ctx, mcpServer, serviceName, servicePort); err != nil {
+		r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionIstioConfigured,
+			string(metav1.ConditionFalse), "IstioConfigurationFailed", fmt.Sprintf("Failed to configure Istio resources: %v", err))
+		return fmt.Errorf("failed to reconcile Istio resources: %w", err)
+	}
+
+	// Set successful Istio configuration condition
+	r.StatusService.SetCondition(mcpServer, mcpv1.MCPServerConditionIstioConfigured,
+		string(metav1.ConditionTrue), "IstioConfigured", "Istio VirtualService and DestinationRule successfully configured")
+
+	logger.Info("Successfully handled Istio integration")
+	return nil
 }

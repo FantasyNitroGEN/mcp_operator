@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [main, develop]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write
@@ -23,6 +27,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Debug refs
+        run: |
+          echo "workflow: $GITHUB_WORKFLOW"
+          echo "event: $GITHUB_EVENT_NAME"
+          echo "repo: $GITHUB_REPOSITORY"
+          echo "branch/ref: $GITHUB_REF"
+          echo "job sha: $GITHUB_SHA"
+          echo "trigger sha: ${{ github.event.pull_request.head.sha || github.sha }}"
       - uses: ./.github/actions/setup-go-ci
         with:
           go-version: '1.24.x'
@@ -32,6 +47,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Debug refs
+        run: |
+          echo "job sha: $GITHUB_SHA"
+          echo "trigger sha: ${{ github.event.pull_request.head.sha || github.sha }}"
       - uses: ./.github/actions/setup-go-ci
         with:
           go-version: '1.24.x'
@@ -46,6 +68,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Debug refs
+        run: |
+          echo "job sha: $GITHUB_SHA"
+          echo "trigger sha: ${{ github.event.pull_request.head.sha || github.sha }}"
       - uses: ./.github/actions/setup-go-ci
         with:
           go-version: '1.24.x'

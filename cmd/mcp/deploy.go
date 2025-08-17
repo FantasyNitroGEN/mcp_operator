@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +27,7 @@ func newDeployCmd() *cobra.Command {
 		wait        bool
 		waitTimeout time.Duration
 		registry    string
+		runtimeType string
 		image       string
 		// Autoscaling flags
 		autoscale   bool
@@ -34,6 +37,21 @@ func newDeployCmd() *cobra.Command {
 		// Environment variable flags
 		envVars        []string
 		envFromSecrets []string
+		// Transport flags
+		transport string
+		httpPath  string
+		// Port flags
+		ports []string
+		port  int32 // deprecated
+		// Gateway flags
+		gateway      bool
+		gatewayImage string
+		gatewayPort  int32
+		gatewayArgs  []string
+		// Istio flags
+		istio        bool
+		istioHost    string
+		istioGateway string
 	)
 
 	cmd := &cobra.Command{
@@ -73,7 +91,7 @@ enrich with registry data and deploy as a running server.`,
   mcp deploy filesystem-server --wait --wait-timeout 5m`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeploy(args[0], registry, namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU, envVars, envFromSecrets, image)
+			return runDeploy(args[0], registry, namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU, envVars, envFromSecrets, runtimeType, image, transport, httpPath, ports, port, gateway, gatewayImage, gatewayPort, gatewayArgs, istio, istioHost, istioGateway)
 		},
 	}
 
@@ -85,7 +103,27 @@ enrich with registry data and deploy as a running server.`,
 	cmd.Flags().BoolVar(&wait, "wait", false, "Wait for the deployment to be ready")
 	cmd.Flags().DurationVar(&waitTimeout, "wait-timeout", 5*time.Minute, "Timeout for waiting for deployment to be ready")
 	cmd.Flags().StringVar(&registry, "registry", "", "Registry name to deploy server from (required)")
+	cmd.Flags().StringVar(&runtimeType, "runtime", "docker", "Runtime type: docker|stdio")
 	cmd.Flags().StringVar(&image, "image", "", "Docker image for runtime=docker (e.g. mcp/postgres)")
+
+	// Transport flags
+	cmd.Flags().StringVar(&transport, "transport", "stdio", "Transport type: stdio|http|streamable-http")
+	cmd.Flags().StringVar(&httpPath, "http-path", "/mcp", "HTTP path for transport=http|streamable-http")
+
+	// Port flags
+	cmd.Flags().StringArrayVar(&ports, "ports", []string{}, "Port configuration name:port[:targetPort[:protocol[:appProtocol]]] (can be repeated)")
+	cmd.Flags().Int32Var(&port, "port", 0, "Port number for MCP server (sets MCPServer.Spec.Runtime.Port)")
+
+	// Gateway flags
+	cmd.Flags().BoolVar(&gateway, "gateway", false, "Enable gateway")
+	cmd.Flags().StringVar(&gatewayImage, "gateway-image", "", "Gateway container image")
+	cmd.Flags().Int32Var(&gatewayPort, "gateway-port", 0, "Gateway port")
+	cmd.Flags().StringArrayVar(&gatewayArgs, "gateway-arg", []string{}, "Gateway container arguments (can be repeated)")
+
+	// Istio flags
+	cmd.Flags().BoolVar(&istio, "istio", false, "Enable Istio integration")
+	cmd.Flags().StringVar(&istioHost, "istio-host", "", "Istio host for VirtualService")
+	cmd.Flags().StringVar(&istioGateway, "istio-gateway", "", "Istio gateway reference (namespace/name)")
 
 	// Autoscaling flags
 	cmd.Flags().BoolVar(&autoscale, "autoscale", false, "Enable horizontal pod autoscaling")
@@ -100,10 +138,166 @@ enrich with registry data and deploy as a running server.`,
 	return cmd
 }
 
-func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string, image string) error {
+// parsePortSpec parses port specification string in format:
+// name:port[:targetPort[:protocol[:appProtocol]]]
+// Supports short forms: 8080, name:8080, 8080:8080
+func parsePortSpec(portStr string) (mcpv1.PortSpec, error) {
+	parts := strings.Split(portStr, ":")
+	portSpec := mcpv1.PortSpec{
+		Protocol: "TCP", // default protocol
+	}
+
+	switch len(parts) {
+	case 1:
+		// Format: "8080"
+		port, err := strconv.ParseInt(parts[0], 10, 32)
+		if err != nil {
+			return portSpec, fmt.Errorf("invalid port number: %s", parts[0])
+		}
+		portSpec.Name = fmt.Sprintf("port-%d", port)
+		portSpec.Port = int32(port)
+		portSpec.TargetPort = int32(port)
+
+	case 2:
+		// Format: "name:8080" or "8080:8081"
+		port, err := strconv.ParseInt(parts[1], 10, 32)
+		if err != nil {
+			return portSpec, fmt.Errorf("invalid port number: %s", parts[1])
+		}
+
+		// Check if first part is a port number (8080:8081 format)
+		if firstPort, err := strconv.ParseInt(parts[0], 10, 32); err == nil {
+			// Format: "8080:8081"
+			portSpec.Name = fmt.Sprintf("port-%d", firstPort)
+			portSpec.Port = int32(firstPort)
+			portSpec.TargetPort = int32(port)
+		} else {
+			// Format: "name:8080"
+			portSpec.Name = parts[0]
+			portSpec.Port = int32(port)
+			portSpec.TargetPort = int32(port)
+		}
+
+	case 3:
+		// Format: "name:8080:8081"
+		port, err := strconv.ParseInt(parts[1], 10, 32)
+		if err != nil {
+			return portSpec, fmt.Errorf("invalid port number: %s", parts[1])
+		}
+		targetPort, err := strconv.ParseInt(parts[2], 10, 32)
+		if err != nil {
+			return portSpec, fmt.Errorf("invalid target port number: %s", parts[2])
+		}
+		portSpec.Name = parts[0]
+		portSpec.Port = int32(port)
+		portSpec.TargetPort = int32(targetPort)
+
+	case 4:
+		// Format: "name:8080:8081:TCP"
+		port, err := strconv.ParseInt(parts[1], 10, 32)
+		if err != nil {
+			return portSpec, fmt.Errorf("invalid port number: %s", parts[1])
+		}
+		targetPort, err := strconv.ParseInt(parts[2], 10, 32)
+		if err != nil {
+			return portSpec, fmt.Errorf("invalid target port number: %s", parts[2])
+		}
+		if parts[3] != "" && parts[3] != "TCP" && parts[3] != "UDP" {
+			return portSpec, fmt.Errorf("invalid protocol: %s (must be TCP or UDP)", parts[3])
+		}
+		portSpec.Name = parts[0]
+		portSpec.Port = int32(port)
+		portSpec.TargetPort = int32(targetPort)
+		if parts[3] != "" {
+			portSpec.Protocol = parts[3]
+		}
+
+	case 5:
+		// Format: "name:8080:8081:TCP:http"
+		port, err := strconv.ParseInt(parts[1], 10, 32)
+		if err != nil {
+			return portSpec, fmt.Errorf("invalid port number: %s", parts[1])
+		}
+		targetPort, err := strconv.ParseInt(parts[2], 10, 32)
+		if err != nil {
+			return portSpec, fmt.Errorf("invalid target port number: %s", parts[2])
+		}
+		if parts[3] != "" && parts[3] != "TCP" && parts[3] != "UDP" {
+			return portSpec, fmt.Errorf("invalid protocol: %s (must be TCP or UDP)", parts[3])
+		}
+		portSpec.Name = parts[0]
+		portSpec.Port = int32(port)
+		portSpec.TargetPort = int32(targetPort)
+		if parts[3] != "" {
+			portSpec.Protocol = parts[3]
+		}
+		if parts[4] != "" {
+			portSpec.AppProtocol = parts[4]
+		}
+
+	default:
+		return portSpec, fmt.Errorf("invalid port format, expected name:port[:targetPort[:protocol[:appProtocol]]]")
+	}
+
+	// Validate port ranges
+	if portSpec.Port < 1 || portSpec.Port > 65535 {
+		return portSpec, fmt.Errorf("port must be between 1 and 65535, got %d", portSpec.Port)
+	}
+	if portSpec.TargetPort < 1 || portSpec.TargetPort > 65535 {
+		return portSpec, fmt.Errorf("target port must be between 1 and 65535, got %d", portSpec.TargetPort)
+	}
+
+	return portSpec, nil
+}
+
+func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string, runtimeType, image, transport, httpPath string, ports []string, port int32, gateway bool, gatewayImage string, gatewayPort int32, gatewayArgs []string, istio bool, istioHost string, istioGateway string) error {
 	// Validate that registry name is provided
 	if registryName == "" {
 		return fmt.Errorf("registry name is required, use --registry flag")
+	}
+
+	// Validate that image is provided when runtime is docker
+	if strings.EqualFold(runtimeType, "docker") && strings.TrimSpace(image) == "" {
+		return fmt.Errorf("--image is required when --runtime=docker")
+	}
+
+	// Validate transport type
+	validTransports := map[string]bool{"stdio": true, "http": true, "streamable-http": true}
+	if !validTransports[transport] {
+		return fmt.Errorf("unsupported transport type: %s. Valid options: stdio, http, streamable-http", transport)
+	}
+
+	// Handle --port flag - this will set MCPServer.Spec.Runtime.Port
+	// The --ports flag is handled separately and takes priority in the operator
+
+	// Show notice for --http-path with stdio transport
+	if transport == "stdio" && httpPath != "/mcp" {
+		fmt.Fprintf(os.Stderr, "NOTICE: --http-path is ignored for stdio transport\n")
+	}
+
+	// Validate gateway configuration
+	if gateway {
+		if gatewayImage == "" {
+			return fmt.Errorf("--gateway-image is required when --gateway is enabled")
+		}
+		if gatewayPort == 0 {
+			return fmt.Errorf("--gateway-port is required when --gateway is enabled")
+		}
+	}
+
+	// Validate Istio configuration
+	if istio && !gateway {
+		return fmt.Errorf("--istio requires --gateway to be enabled")
+	}
+
+	// Parse and validate ports
+	var parsedPorts []mcpv1.PortSpec
+	for _, portStr := range ports {
+		portSpec, err := parsePortSpec(portStr)
+		if err != nil {
+			return fmt.Errorf("invalid --ports entry '%s': %w", portStr, err)
+		}
+		parsedPorts = append(parsedPorts, portSpec)
 	}
 
 	fmt.Printf("Creating MCPServer '%s' from registry '%s'...\n", serverName, registryName)
@@ -128,6 +322,38 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 		})
 	}
 
+	// Create transport spec
+	var transportSpec *mcpv1.TransportSpec
+	if transport != "" {
+		transportSpec = &mcpv1.TransportSpec{
+			Type: transport,
+		}
+		// Only set path for http/streamable-http transports
+		if transport == "http" || transport == "streamable-http" {
+			transportSpec.Path = httpPath
+		}
+	}
+
+	// Create gateway spec
+	var gatewaySpec *mcpv1.GatewaySpec
+	if gateway {
+		gatewaySpec = &mcpv1.GatewaySpec{
+			Enabled: true,
+			Image:   gatewayImage,
+			Port:    gatewayPort,
+			Args:    gatewayArgs,
+		}
+
+		// Add Istio configuration if enabled
+		if istio {
+			gatewaySpec.Istio = &mcpv1.GatewayIstioSpec{
+				Enabled:    true,
+				Host:       istioHost,
+				GatewayRef: istioGateway,
+			}
+		}
+	}
+
 	// Create MCPServer resource
 	mcpServer := &mcpv1.MCPServer{
 		ObjectMeta: metav1.ObjectMeta{
@@ -145,16 +371,20 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 			},
 		},
 		Spec: mcpv1.MCPServerSpec{
-			Registry: mcpv1.MCPRegistryInfo{
+			Registry: &mcpv1.RegistryRef{
 				RegistryName: registryName,
 				ServerName:   serverName,
 			},
-			Runtime: mcpv1.MCPRuntimeSpec{
-				Type:  "docker", // Default to docker, will be enriched from registry
+			Runtime: &mcpv1.RuntimeSpec{
+				Type:  runtimeType,
 				Image: image,
 				Env:   envMap,
+				Port:  port,
 			},
-			EnvFrom: envFromSources,
+			Transport: transportSpec,
+			Ports:     parsedPorts,
+			Gateway:   gatewaySpec,
+			EnvFrom:   envFromSources,
 		},
 	}
 
@@ -254,8 +484,8 @@ metadata:
     mcp.allbeone.io/deployed-at: %s
 spec:
   registry:
-    registryName: %s
-    serverName: %s
+    registry: %s
+    server: %s
   runtime:
     type: %s`,
 		"mcp.allbeone.io/v1",
@@ -268,7 +498,7 @@ spec:
 		mcpServer.Labels["app.kubernetes.io/created-by"],
 		mcpServer.Annotations["mcp.allbeone.io/deployed-by"],
 		mcpServer.Annotations["mcp.allbeone.io/deployed-at"],
-		mcpServer.Spec.Registry.RegistryName,
+		mcpServer.Spec.Registry.Registry,
 		mcpServer.Spec.Registry.ServerName,
 		mcpServer.Spec.Runtime.Type,
 	)
@@ -277,6 +507,9 @@ spec:
 	if mcpServer.Spec.Runtime.Image != "" {
 		fmt.Printf("\n    image: %s", mcpServer.Spec.Runtime.Image)
 	}
+
+	// Print port if present (including 0 for verification)
+	fmt.Printf("\n    port: %d", mcpServer.Spec.Runtime.Port)
 
 	// Print environment variables if present
 	if len(mcpServer.Spec.Runtime.Env) > 0 {
@@ -297,6 +530,62 @@ spec:
 			if envFrom.ConfigMapRef != nil {
 				fmt.Printf("\n  - configMapRef:")
 				fmt.Printf("\n      name: %s", envFrom.ConfigMapRef.Name)
+			}
+		}
+	}
+
+	// Print transport if present
+	if mcpServer.Spec.Transport != nil {
+		fmt.Printf("\n  transport:")
+		fmt.Printf("\n    type: %s", mcpServer.Spec.Transport.Type)
+		if mcpServer.Spec.Transport.Path != "" {
+			fmt.Printf("\n    path: %s", mcpServer.Spec.Transport.Path)
+		}
+	}
+
+	// Print ports if present
+	if len(mcpServer.Spec.Ports) > 0 {
+		fmt.Printf("\n  ports:")
+		for _, port := range mcpServer.Spec.Ports {
+			fmt.Printf("\n  - name: %s", port.Name)
+			fmt.Printf("\n    port: %d", port.Port)
+			if port.TargetPort > 0 {
+				fmt.Printf("\n    targetPort: %d", port.TargetPort)
+			}
+			if port.Protocol != "" {
+				fmt.Printf("\n    protocol: %s", port.Protocol)
+			}
+			if port.AppProtocol != "" {
+				fmt.Printf("\n    appProtocol: %s", port.AppProtocol)
+			}
+		}
+	}
+
+	// Print gateway if present
+	if mcpServer.Spec.Gateway != nil {
+		fmt.Printf("\n  gateway:")
+		fmt.Printf("\n    enabled: %t", mcpServer.Spec.Gateway.Enabled)
+		if mcpServer.Spec.Gateway.Image != "" {
+			fmt.Printf("\n    image: %s", mcpServer.Spec.Gateway.Image)
+		}
+		if mcpServer.Spec.Gateway.Port > 0 {
+			fmt.Printf("\n    port: %d", mcpServer.Spec.Gateway.Port)
+		}
+		if len(mcpServer.Spec.Gateway.Args) > 0 {
+			fmt.Printf("\n    args:")
+			for _, arg := range mcpServer.Spec.Gateway.Args {
+				fmt.Printf("\n    - %s", arg)
+			}
+		}
+		// Print Istio configuration if present
+		if mcpServer.Spec.Gateway.Istio != nil {
+			fmt.Printf("\n    istio:")
+			fmt.Printf("\n      enabled: %t", mcpServer.Spec.Gateway.Istio.Enabled)
+			if mcpServer.Spec.Gateway.Istio.Host != "" {
+				fmt.Printf("\n      host: %s", mcpServer.Spec.Gateway.Istio.Host)
+			}
+			if mcpServer.Spec.Gateway.Istio.GatewayRef != "" {
+				fmt.Printf("\n      gatewayRef: %s", mcpServer.Spec.Gateway.Istio.GatewayRef)
 			}
 		}
 	}

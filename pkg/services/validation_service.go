@@ -37,7 +37,7 @@ func (v *DefaultValidationService) ValidateMCPServer(ctx context.Context, mcpSer
 	}
 
 	// Validate runtime specification
-	if err := v.validateRuntimeSpec(mcpServer.Spec.Runtime); err != nil {
+	if err := v.validateRuntimeSpec(mcpServer.Spec.Runtime, mcpServer.Spec.Transport); err != nil {
 		return fmt.Errorf("runtime validation failed: %w", err)
 	}
 
@@ -181,21 +181,35 @@ func (v *DefaultValidationService) ValidateRegistry(ctx context.Context, registr
 }
 
 // validateRegistryInfo validates registry information in MCPServer
-func (v *DefaultValidationService) validateRegistryInfo(registry mcpv1.MCPRegistryInfo) error {
-	if registry.Name == "" {
-		return fmt.Errorf("registry name is required")
+func (v *DefaultValidationService) validateRegistryInfo(registry *mcpv1.RegistryRef) error {
+	if registry == nil {
+		return fmt.Errorf("registry information is required")
 	}
 
-	if len(registry.Name) > 253 {
-		return fmt.Errorf("registry name cannot be longer than 253 characters")
+	// Check for current field structure - backward compatibility removed
+	hasRegistryName := registry.RegistryName != "" || registry.Registry != ""
+
+	if !hasRegistryName {
+		return fmt.Errorf("registry name is required: use registryName field or registry field")
+	}
+
+	// Validate current field structure only
+	if registry.RegistryName != "" && len(registry.RegistryName) > 253 {
+		return fmt.Errorf("registry registryName cannot be longer than 253 characters")
+	}
+	if registry.Registry != "" && len(registry.Registry) > 253 {
+		return fmt.Errorf("registry registry field cannot be longer than 253 characters")
+	}
+	if registry.ServerName != "" && len(registry.ServerName) > 253 {
+		return fmt.Errorf("registry serverName cannot be longer than 253 characters")
 	}
 
 	return nil
 }
 
 // validateRuntimeSpec validates runtime specification
-func (v *DefaultValidationService) validateRuntimeSpec(runtime mcpv1.MCPRuntimeSpec) error {
-	if runtime.Type == "" {
+func (v *DefaultValidationService) validateRuntimeSpec(runtime *mcpv1.RuntimeSpec, transport *mcpv1.TransportSpec) error {
+	if runtime == nil || runtime.Type == "" {
 		return fmt.Errorf("runtime type is required")
 	}
 
@@ -205,14 +219,17 @@ func (v *DefaultValidationService) validateRuntimeSpec(runtime mcpv1.MCPRuntimeS
 			runtime.Type, strings.Join(validTypes, ", "))
 	}
 
-	// For docker runtime, image is required
+	// For docker runtime, an image is required
 	if runtime.Type == "docker" && runtime.Image == "" {
 		return fmt.Errorf("image is required for docker runtime")
 	}
 
-	// Validate port
-	if runtime.Port < 0 || runtime.Port > 65535 {
-		return fmt.Errorf("port must be between 0 and 65535")
+	// Validate port - skip validation for STDIO transport since ports are not required
+	isStdioTransport := transport != nil && transport.Type == "stdio"
+	if !isStdioTransport {
+		if runtime.Port < 0 || runtime.Port > 65535 {
+			return fmt.Errorf("port must be between 0 and 65535")
+		}
 	}
 
 	return nil

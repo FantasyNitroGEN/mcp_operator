@@ -7,6 +7,9 @@ on:
     branches: [ main, develop ]
     types: [ completed ]
 
+concurrency:
+  group: helm-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -24,6 +27,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - name: Debug refs
+        run: |
+          echo "event: $GITHUB_EVENT_NAME"
+          echo "job sha: $GITHUB_SHA"
+          echo "trigger sha: ${{ github.event.workflow_run.head_sha || github.sha }}"
 
       - name: Setup Go (for controller-gen)
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
@@ -41,7 +52,10 @@ jobs:
         with:
           helm-version: v3.14.4
           chart-path: helm/mcp-operator
-          ct-target-branch: main
+          # важно: укажем базовую ветку, от которой считаем изменения чарта
+          # если хочешь всегда сравнивать с main — оставь main
+          # если нужно сравнивать с веткой триггера — подставляем head_branch:
+          ct-target-branch: ${{ github.event.workflow_run.head_branch || 'main' }}
           run-install: "true"
 
   publish-oci:
@@ -50,6 +64,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - name: Debug refs
+        run: |
+          echo "event: $GITHUB_EVENT_NAME"
+          echo "job sha: $GITHUB_SHA"
+          echo "trigger sha: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Go (for controller-gen)
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
@@ -74,6 +96,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - name: Debug refs
+        run: |
+          echo "event: $GITHUB_EVENT_NAME"
+          echo "job sha: $GITHUB_SHA"
+          echo "trigger sha: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Go (for controller-gen)
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5
