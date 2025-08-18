@@ -103,9 +103,6 @@ type MCPRegistryStatus struct {
 	// ServersDiscovered is the number of servers discovered in this registry
 	ServersDiscovered int32 `json:"serversDiscovered,omitempty"`
 
-	// AvailableServers is the number of servers available in this registry (deprecated, use ServersDiscovered)
-	AvailableServers int32 `json:"availableServers,omitempty"`
-
 	// Errors contains the last N errors as strings
 	Errors []string `json:"errors,omitempty"`
 
@@ -117,9 +114,6 @@ type MCPRegistryStatus struct {
 
 	// Servers contains information about available servers in the registry
 	Servers []RegistryServer `json:"servers,omitempty"`
-
-	// ServerList contains information about available servers in the registry (deprecated, use Servers)
-	ServerList []MCPServerInfo `json:"serverList,omitempty"`
 }
 
 // MCPRegistryPhase represents the phase of the registry lifecycle

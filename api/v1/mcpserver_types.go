@@ -800,9 +800,6 @@ type IstioRetryPolicy struct {
 }
 
 type RegistryRef struct {
-	// Deprecated: use RegistryName instead. Имя MCPRegistry-ресурса (должно существовать в ns). Нужно для поиска кэша.
-	Name string `json:"name,omitempty"`
-
 	// RegistryName название MCPRegistry в том же namespace
 	RegistryName string `json:"registryName,omitempty"`
 
@@ -811,9 +808,6 @@ type RegistryRef struct {
 
 	// Registry имя MCPRegistry (например, "default-registry") - алиас для обратной совместимости
 	Registry string `json:"registry,omitempty"`
-
-	// Deprecated: use ServerName instead. (Опционально) имя сервера в реестре; если пусто — берем metadata.name
-	Server string `json:"server,omitempty"`
 }
 
 // TransportSpec определяет тип транспорта для MCP сервера
@@ -915,9 +909,6 @@ type MCPServerSpec struct {
 	// Resources определяет требования к ресурсам
 	Resources ResourceRequirements `json:"resources,omitempty"`
 
-	// Deprecated: use Env
-	Environment map[string]string `json:"environment,omitempty"`
-
 	// Env содержит переменные окружения
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
@@ -974,12 +965,6 @@ type MCPServerSpec struct {
 
 	// Gateway конфигурация gateway для MCP сервера
 	Gateway *GatewaySpec `json:"gateway,omitempty"`
-
-	// Port устаревшее поле для обратной совместимости
-	// Deprecated: use Ports
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=65535
-	Port *int32 `json:"port,omitempty"`
 
 	// Istio конфигурация интеграции с Istio service mesh
 	Istio *IstioSpec `json:"istio,omitempty"`

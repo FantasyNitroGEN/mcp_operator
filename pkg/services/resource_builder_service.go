@@ -535,17 +535,7 @@ func (r *DefaultResourceBuilderService) collectContainerPorts(mcpServer *mcpv1.M
 		return containerPorts
 	}
 
-	// Second priority: convert legacy spec.port if provided
-	if mcpServer.Spec.Port != nil && *mcpServer.Spec.Port > 0 {
-		containerPorts = append(containerPorts, corev1.ContainerPort{
-			Name:          "mcp",
-			ContainerPort: *mcpServer.Spec.Port,
-			Protocol:      corev1.ProtocolTCP,
-		})
-		return containerPorts
-	}
-
-	// Third priority: use runtime.port if provided
+	// Second priority: use runtime.port if provided
 	if mcpServer.Spec.Runtime != nil && mcpServer.Spec.Runtime.Port > 0 {
 		containerPorts = append(containerPorts, corev1.ContainerPort{
 			Name:          "mcp",

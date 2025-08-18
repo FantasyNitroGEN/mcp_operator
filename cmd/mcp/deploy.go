@@ -43,7 +43,6 @@ func newDeployCmd() *cobra.Command {
 		httpPath  string
 		// Port flags
 		ports []string
-		port  int32 // deprecated
 		// Gateway flags
 		gateway      bool
 		gatewayImage string
@@ -92,7 +91,7 @@ enrich with registry data and deploy as a running server.`,
   mcp deploy filesystem-server --wait --wait-timeout 5m`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeploy(args[0], registry, namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU, envVars, envFromSecrets, runtimeType, image, transport, httpPath, ports, port, gateway, gatewayImage, gatewayPort, gatewayArgs, istio, istioHost, istioGateway)
+			return runDeploy(args[0], registry, namespace, kubeconfig, timeout, replicas, dryRun, wait, waitTimeout, autoscale, minReplicas, maxReplicas, targetCPU, envVars, envFromSecrets, runtimeType, image, transport, httpPath, ports, gateway, gatewayImage, gatewayPort, gatewayArgs, istio, istioHost, istioGateway)
 		},
 	}
 
@@ -113,7 +112,6 @@ enrich with registry data and deploy as a running server.`,
 
 	// Port flags
 	cmd.Flags().StringArrayVar(&ports, "ports", []string{}, "Port configuration name:port[:targetPort[:protocol[:appProtocol]]] (can be repeated)")
-	cmd.Flags().Int32Var(&port, "port", 0, "Port number for MCP server (sets MCPServer.Spec.Runtime.Port)")
 
 	// Gateway flags
 	cmd.Flags().BoolVar(&gateway, "gateway", false, "Enable gateway")
@@ -251,7 +249,7 @@ func parsePortSpec(portStr string) (mcpv1.PortSpec, error) {
 	return portSpec, nil
 }
 
-func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string, runtimeType, image, transport, httpPath string, ports []string, port int32, gateway bool, gatewayImage string, gatewayPort int32, gatewayArgs []string, istio bool, istioHost string, istioGateway string) error {
+func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string, runtimeType, image, transport, httpPath string, ports []string, gateway bool, gatewayImage string, gatewayPort int32, gatewayArgs []string, istio bool, istioHost string, istioGateway string) error {
 	logger := log.Log.WithName("mcp-deploy").WithValues(
 		"server", serverName,
 		"registry", registryName,
@@ -398,7 +396,6 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 				Type:  runtimeType,
 				Image: image,
 				Env:   envMap,
-				Port:  port,
 			},
 			Transport: transportSpec,
 			Ports:     parsedPorts,

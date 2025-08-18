@@ -11,7 +11,6 @@ import (
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -305,24 +304,21 @@ func (r *DefaultRegistryService) SyncRegistry(ctx context.Context, registry *mcp
 	}
 
 	// Update registry status with server information
-	registry.Status.AvailableServers = int32(len(servers))
+	registry.Status.ServersDiscovered = int32(len(servers))
 
-	// Convert to MCPServerInfo format for status
-	serverInfos := make([]mcpv1.MCPServerInfo, len(servers))
+	// Convert to RegistryServer format for status
+	registryServers := make([]mcpv1.RegistryServer, len(servers))
 	for i, server := range servers {
-		serverInfos[i] = mcpv1.MCPServerInfo{
+		registryServers[i] = mcpv1.RegistryServer{
 			Name:        server.Name,
 			Description: fmt.Sprintf("Server from %s", server.Path),
-		}
-		if !server.UpdatedAt.IsZero() {
-			lastUpdated := metav1.NewTime(server.UpdatedAt)
-			serverInfos[i].LastUpdated = &lastUpdated
+			Path:        server.Path,
 		}
 	}
-	registry.Status.ServerList = serverInfos
+	registry.Status.Servers = registryServers
 
 	logger.Info("Successfully synchronized registry data",
-		"availableServers", len(servers))
+		"serversDiscovered", len(servers))
 
 	return nil
 }

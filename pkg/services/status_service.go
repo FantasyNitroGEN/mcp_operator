@@ -66,7 +66,7 @@ func (s *DefaultStatusService) UpdateMCPRegistryStatus(ctx context.Context, regi
 
 	logger.V(1).Info("Successfully updated MCPRegistry status",
 		"phase", registry.Status.Phase,
-		"availableServers", registry.Status.AvailableServers,
+		"serversDiscovered", registry.Status.ServersDiscovered,
 		"lastSyncTime", registry.Status.LastSyncTime,
 		"message", registry.Status.Message)
 

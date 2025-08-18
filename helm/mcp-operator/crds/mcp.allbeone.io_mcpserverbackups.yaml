@@ -1948,11 +1948,6 @@ spec:
                               type: object
                           type: object
                         type: array
-                      environment:
-                        additionalProperties:
-                          type: string
-                        description: 'Deprecated: use Env'
-                        type: object
                       gateway:
                         description: Gateway конфигурация gateway для MCP сервера
                         properties:
@@ -2250,14 +2245,6 @@ spec:
                         description: NodeSelector для размещения подов на определенных
                           узлах
                         type: object
-                      port:
-                        description: |-
-                          Port устаревшее поле для обратной совместимости
-                          Deprecated: use Ports
-                        format: int32
-                        maximum: 65535
-                        minimum: 1
-                        type: integer
                       ports:
                         description: Ports определяет множественные порты для сервиса
                         items:
@@ -2297,11 +2284,6 @@ spec:
                         description: Registry содержит информацию о сервере из MCP
                           Registry
                         properties:
-                          name:
-                            description: 'Deprecated: use RegistryName instead. Имя
-                              MCPRegistry-ресурса (должно существовать в ns). Нужно
-                              для поиска кэша.'
-                            type: string
                           registry:
                             description: Registry имя MCPRegistry (например, "default-registry")
                               - алиас для обратной совместимости
@@ -2309,10 +2291,6 @@ spec:
                           registryName:
                             description: RegistryName название MCPRegistry в том же
                               namespace
-                            type: string
-                          server:
-                            description: 'Deprecated: use ServerName instead. (Опционально)
-                              имя сервера в реестре; если пусто — берем metadata.name'
                             type: string
                           serverName:
                             description: ServerName имя сервера в реестре
