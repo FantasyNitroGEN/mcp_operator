@@ -380,13 +380,13 @@ func (r *DefaultRegistryService) GetRegistryClient() *registry.Client {
 func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, mcpServer *mcpv1.MCPServer, namespace string) error {
 	logger := log.FromContext(ctx).WithValues(
 		"mcpserver", mcpServer.Name,
-		"registryName", mcpServer.Spec.Registry.Registry,
+		"registryName", mcpServer.Spec.Registry.Name,
 		"serverName", mcpServer.Spec.Registry.ServerName,
 	)
 	logger.Info("Enriching MCPServer from cache")
 
 	// Validate required fields
-	if mcpServer.Spec.Registry.Registry == "" {
+	if mcpServer.Spec.Registry.Name == "" {
 		return fmt.Errorf("registry name is required for cache enrichment")
 	}
 
@@ -398,7 +398,7 @@ func (r *DefaultRegistryService) EnrichMCPServerFromCache(ctx context.Context, m
 	}
 
 	// Find ConfigMap mcpregistry-<registryName>-<serverName>
-	configMapName := fmt.Sprintf("mcpregistry-%s-%s", reg.Registry, server)
+	configMapName := fmt.Sprintf("mcpregistry-%s-%s", reg.Name, server)
 	configMap := &corev1.ConfigMap{}
 
 	// Use the provided namespace parameter instead of mcpServer.Namespace
