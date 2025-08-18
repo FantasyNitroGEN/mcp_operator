@@ -389,8 +389,8 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 		},
 		Spec: mcpv1.MCPServerSpec{
 			Registry: &mcpv1.RegistryRef{
-				RegistryName: registryName,
-				ServerName:   serverName,
+				Name:       registryName,
+				ServerName: serverName,
 			},
 			Runtime: &mcpv1.RuntimeSpec{
 				Type:  runtimeType,
@@ -507,7 +507,7 @@ metadata:
     mcp.allbeone.io/deployed-at: %s
 spec:
   registry:
-    registryName: %s
+    name: %s
     serverName: %s
   runtime:
     type: %s`,
@@ -521,7 +521,7 @@ spec:
 		mcpServer.Labels["app.kubernetes.io/created-by"],
 		mcpServer.Annotations["mcp.allbeone.io/deployed-by"],
 		mcpServer.Annotations["mcp.allbeone.io/deployed-at"],
-		mcpServer.Spec.Registry.RegistryName,
+		mcpServer.Spec.Registry.Name,
 		mcpServer.Spec.Registry.ServerName,
 		mcpServer.Spec.Runtime.Type,
 	)

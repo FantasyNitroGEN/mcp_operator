@@ -240,12 +240,12 @@ func (s *DefaultAutoUpdateService) IsUpdateRequired(ctx context.Context, mcpServ
 	)
 
 	// Skip if no registry is configured - use current fields only
-	if mcpServer.Spec.Registry.RegistryName == "" && mcpServer.Spec.Registry.Registry == "" {
+	if mcpServer.Spec.Registry.Name == "" && mcpServer.Spec.Registry.Registry == "" {
 		return false, nil, nil
 	}
 
 	// Fetch latest server specification from registry - use current fields only
-	registryName := mcpServer.Spec.Registry.RegistryName
+	registryName := mcpServer.Spec.Registry.Name
 	if registryName == "" {
 		registryName = mcpServer.Spec.Registry.Registry
 	}

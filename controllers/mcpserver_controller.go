@@ -113,8 +113,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	var registryName, serverName string
 	if mcpServer.Spec.Registry != nil {
 		// Use current fields only - backward compatibility removed
-		if mcpServer.Spec.Registry.RegistryName != "" {
-			registryName = mcpServer.Spec.Registry.RegistryName
+		if mcpServer.Spec.Registry.Name != "" {
+			registryName = mcpServer.Spec.Registry.Name
 		} else if mcpServer.Spec.Registry.Registry != "" {
 			registryName = mcpServer.Spec.Registry.Registry
 		}
@@ -547,8 +547,8 @@ func (r *MCPServerReconciler) handleDeletion(ctx context.Context, logger logr.Lo
 		if mcpServer.Spec.Registry != nil {
 			var registryName string
 			// Use current fields only - backward compatibility removed
-			if mcpServer.Spec.Registry.RegistryName != "" {
-				registryName = mcpServer.Spec.Registry.RegistryName
+			if mcpServer.Spec.Registry.Name != "" {
+				registryName = mcpServer.Spec.Registry.Name
 			} else if mcpServer.Spec.Registry.Registry != "" {
 				registryName = mcpServer.Spec.Registry.Registry
 			}
@@ -665,8 +665,8 @@ func (r *MCPServerReconciler) findMCPServersForConfigMap(ctx context.Context, co
 			var mcpRegistryName, mcpServerName string
 
 			// Use current fields only - backward compatibility removed
-			if mcpServer.Spec.Registry.RegistryName != "" {
-				mcpRegistryName = mcpServer.Spec.Registry.RegistryName
+			if mcpServer.Spec.Registry.Name != "" {
+				mcpRegistryName = mcpServer.Spec.Registry.Name
 			} else if mcpServer.Spec.Registry.Registry != "" {
 				mcpRegistryName = mcpServer.Spec.Registry.Registry
 			}
@@ -789,8 +789,8 @@ func (r *MCPServerReconciler) applyRenderedResources(ctx context.Context, logger
 		if mcpServer.Spec.Registry != nil {
 			// Use current fields only - backward compatibility removed
 			var registryName, serverName string
-			if mcpServer.Spec.Registry.RegistryName != "" {
-				registryName = mcpServer.Spec.Registry.RegistryName
+			if mcpServer.Spec.Registry.Name != "" {
+				registryName = mcpServer.Spec.Registry.Name
 			} else if mcpServer.Spec.Registry.Registry != "" {
 				registryName = mcpServer.Spec.Registry.Registry
 			}

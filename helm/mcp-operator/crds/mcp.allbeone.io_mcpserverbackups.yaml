@@ -2284,13 +2284,12 @@ spec:
                         description: Registry содержит информацию о сервере из MCP
                           Registry
                         properties:
+                          name:
+                            description: Name название MCPRegistry в том же namespace
+                            type: string
                           registry:
                             description: Registry имя MCPRegistry (например, "default-registry")
                               - алиас для обратной совместимости
-                            type: string
-                          registryName:
-                            description: RegistryName название MCPRegistry в том же
-                              namespace
                             type: string
                           serverName:
                             description: ServerName имя сервера в реестре

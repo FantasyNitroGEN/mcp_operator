@@ -187,15 +187,15 @@ func (v *DefaultValidationService) validateRegistryInfo(registry *mcpv1.Registry
 	}
 
 	// Check for current field structure - backward compatibility removed
-	hasRegistryName := registry.RegistryName != "" || registry.Registry != ""
+	hasRegistryName := registry.Name != "" || registry.Registry != ""
 
 	if !hasRegistryName {
-		return fmt.Errorf("registry name is required: use registryName field or registry field")
+		return fmt.Errorf("registry name is required: use name field or registry field")
 	}
 
 	// Validate current field structure only
-	if registry.RegistryName != "" && len(registry.RegistryName) > 253 {
-		return fmt.Errorf("registry registryName cannot be longer than 253 characters")
+	if registry.Name != "" && len(registry.Name) > 253 {
+		return fmt.Errorf("registry name cannot be longer than 253 characters")
 	}
 	if registry.Registry != "" && len(registry.Registry) > 253 {
 		return fmt.Errorf("registry registry field cannot be longer than 253 characters")

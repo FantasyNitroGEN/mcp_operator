@@ -800,8 +800,8 @@ type IstioRetryPolicy struct {
 }
 
 type RegistryRef struct {
-	// RegistryName название MCPRegistry в том же namespace
-	RegistryName string `json:"registryName,omitempty"`
+	// Name название MCPRegistry в том же namespace
+	Name string `json:"name,omitempty"`
 
 	// ServerName имя сервера в реестре
 	ServerName string `json:"serverName,omitempty"`

@@ -126,15 +126,15 @@ func (v *MCPServerValidator) validateRegistryInfo(mcpServer *mcpv1.MCPServer) fi
 		return allErrs
 	}
 
-	// Validate current field structure - only RegistryName and ServerName
-	if registry.RegistryName == "" {
-		allErrs = append(allErrs, field.Required(specPath.Child("registry", "registryName"), "registry name is required"))
+	// Validate current field structure - only Name and ServerName
+	if registry.Name == "" {
+		allErrs = append(allErrs, field.Required(specPath.Child("registry", "name"), "registry name is required"))
 		return allErrs
 	}
 
-	// registryName is required, serverName is optional (can be defaulted from MCPServer name)
-	if len(registry.RegistryName) > 253 {
-		allErrs = append(allErrs, field.Invalid(specPath.Child("registry", "registryName"), registry.RegistryName, "registry registryName cannot be longer than 253 characters"))
+	// name is required, serverName is optional (can be defaulted from MCPServer name)
+	if len(registry.Name) > 253 {
+		allErrs = append(allErrs, field.Invalid(specPath.Child("registry", "name"), registry.Name, "registry name cannot be longer than 253 characters"))
 	}
 	if registry.ServerName != "" && len(registry.ServerName) > 253 {
 		allErrs = append(allErrs, field.Invalid(specPath.Child("registry", "serverName"), registry.ServerName, "registry serverName cannot be longer than 253 characters"))
@@ -153,7 +153,7 @@ func (v *MCPServerValidator) validateImageSecurity(mcpServer *mcpv1.MCPServer) f
 
 		// Check if registry is specified - if so, allow empty image
 		registrySpecified := mcpServer.Spec.Registry != nil &&
-			mcpServer.Spec.Registry.RegistryName != ""
+			mcpServer.Spec.Registry.Name != ""
 
 		if image == "" {
 			if !registrySpecified {
@@ -338,9 +338,9 @@ func (d *MCPServerDefaulter) setDefaults(mcpServer *mcpv1.MCPServer) {
 		mcpServer.Spec.Registry.ServerName = mcpServer.Name
 	}
 
-	// Default registry.registryName to "default-registry" if empty
-	if mcpServer.Spec.Registry.RegistryName == "" {
-		mcpServer.Spec.Registry.RegistryName = "default-registry"
+	// Default registry.name to "default-registry" if empty
+	if mcpServer.Spec.Registry.Name == "" {
+		mcpServer.Spec.Registry.Name = "default-registry"
 	}
 
 	// Set defaults for each port in spec.ports
