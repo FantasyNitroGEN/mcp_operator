@@ -341,6 +341,7 @@ jobs:
       - name: Deploy MCP server (postgres) from registry
         run: |
           set -e
+          kubectl config set-context --current --namespace=mcp
           ./bin/mcp server deploy postgres \
             --registry default-registry \
             --kubeconfig "$KUBECONFIG" \
@@ -355,7 +356,9 @@ jobs:
         if: ${{ always() }}
         run: |
           set +e
-          echo "== MCPServer list =="
+          echo "== MCPServers (all namespaces) =="
+          kubectl get mcpservers -A || true
+          echo "== MCPServers (ns mcp) =="
           kubectl -n mcp get mcpservers -o wide || true
           echo "== MCPServer spec (debug) =="
           kubectl -n mcp get mcpserver postgres -o json | jq '.spec' || true
