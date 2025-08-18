@@ -19,6 +19,7 @@ import (
 
 	"github.com/FantasyNitroGEN/mcp_operator/pkg/retry"
 	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
@@ -472,23 +473,18 @@ func (c *Client) getServerSpecWithRateLimit(ctx context.Context, serverName stri
 		templateDigest := hex.EncodeToString(hash[:])
 
 		var parsedSpec MCPServerSpec
-		if err := json.Unmarshal(content, &parsedSpec); err != nil {
-			if strings.Contains(string(content), "name:") {
-				spec, err = c.parseYAMLContent(content)
-				if err != nil {
-					if closeErr := resp.Body.Close(); closeErr != nil {
-						fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
-					}
-					return resp, err
-				}
-			} else {
+		// Try YAML parsing first, then JSON as fallback
+		spec, err = c.parseYAMLContent(content)
+		if err != nil {
+			// If YAML parsing fails, try JSON
+			if jsonErr := json.Unmarshal(content, &parsedSpec); jsonErr != nil {
 				if closeErr := resp.Body.Close(); closeErr != nil {
 					fmt.Fprintf(os.Stderr, "Failed to close response body: %v\n", closeErr)
 				}
-				return resp, fmt.Errorf("failed to parse server spec: %w", err)
+				return resp, fmt.Errorf("failed to parse server spec as YAML (%v) or JSON (%v)", err, jsonErr)
+			} else {
+				spec = &parsedSpec
 			}
-		} else {
-			spec = &parsedSpec
 		}
 
 		if spec != nil {
@@ -616,6 +612,14 @@ func (c *Client) HasLocalRegistry(registryPath string) bool {
 
 // SyncRepository синхронизирует серверы из указанного GitHub репозитория
 func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*SyncResult, error) {
+	logger := log.FromContext(ctx).WithName("registry-client").WithValues(
+		"repo", fmt.Sprintf("%s/%s", repo.Owner, repo.Name),
+		"branch", repo.Branch,
+		"path", repo.Path,
+	)
+
+	logger.Info("Starting repository synchronization")
+
 	// Создаем новый клиент с настройками для конкретного репозитория
 	repoClient := &Client{
 		httpClient:    c.httpClient,
@@ -646,31 +650,39 @@ func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*S
 	repoClient.baseURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", repo.Owner, repo.Name, basePath)
 
 	// Получаем список серверов и rate limit info
+	logger.V(1).Info("Listing servers from repository")
 	var rateLimitInfo *RateLimitInfo
 	servers, err := repoClient.listServersWithRateLimit(ctx, &rateLimitInfo)
 	if err != nil {
+		logger.Error(err, "Failed to list servers from repository")
 		return &SyncResult{
 			Errors:        []string{fmt.Sprintf("failed to list servers: %v", err)},
 			RateLimitInfo: rateLimitInfo,
 		}, err
 	}
+	logger.Info("Successfully listed servers", "serversFound", len(servers))
 
 	// Получаем спецификации для каждого сервера
+	logger.V(1).Info("Retrieving server specifications")
 	serverSpecs := make(map[string]*MCPServerSpec)
 	var syncErrors []string
 	observedSHA := ""
 
 	for _, server := range servers {
+		logger.V(2).Info("Getting server spec", "serverName", server.Name)
 		spec, err := repoClient.getServerSpecWithRateLimit(ctx, server.Name, &rateLimitInfo)
 		if err != nil {
+			logger.Error(err, "Failed to get server spec", "serverName", server.Name)
 			syncErrors = append(syncErrors, fmt.Sprintf("failed to get spec for %s: %v", server.Name, err))
 			continue
 		}
 		if spec == nil {
 			// Server doesn't have server.yaml file (404) - skip it
+			logger.V(2).Info("Server spec not found, skipping", "serverName", server.Name)
 			continue
 		}
 		serverSpecs[server.Name] = spec
+		logger.V(2).Info("Successfully retrieved server spec", "serverName", server.Name)
 		// Используем первый успешно полученный SHA как observedSHA
 		if observedSHA == "" && spec.TemplateDigest != "" {
 			observedSHA = spec.TemplateDigest
@@ -681,10 +693,15 @@ func (c *Client) SyncRepository(ctx context.Context, repo *GitHubRepository) (*S
 		Servers:       servers,
 		ServerSpecs:   serverSpecs,
 		ObservedSHA:   observedSHA,
-		ServersCount:  int32(len(servers)),
+		ServersCount:  int32(len(serverSpecs)),
 		Errors:        syncErrors,
 		RateLimitInfo: rateLimitInfo,
 	}
+
+	logger.Info("Repository synchronization completed",
+		"serversFound", len(servers),
+		"specsRetrieved", len(serverSpecs),
+		"errors", len(syncErrors))
 
 	return result, nil
 }

@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	mcpv1 "github.com/FantasyNitroGEN/mcp_operator/api/v1"
 )
@@ -251,19 +252,31 @@ func parsePortSpec(portStr string) (mcpv1.PortSpec, error) {
 }
 
 func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout time.Duration, replicas int32, dryRun, wait bool, waitTimeout time.Duration, autoscale bool, minReplicas, maxReplicas, targetCPU int32, envVars []string, envFromSecrets []string, runtimeType, image, transport, httpPath string, ports []string, port int32, gateway bool, gatewayImage string, gatewayPort int32, gatewayArgs []string, istio bool, istioHost string, istioGateway string) error {
+	logger := log.Log.WithName("mcp-deploy").WithValues(
+		"server", serverName,
+		"registry", registryName,
+		"namespace", namespace,
+		"runtime", runtimeType,
+	)
+
+	logger.Info("Starting MCP server deployment")
+
 	// Validate that registry name is provided
 	if registryName == "" {
+		logger.Error(nil, "Registry name is required")
 		return fmt.Errorf("registry name is required, use --registry flag")
 	}
 
 	// Validate that image is provided when runtime is docker
 	if strings.EqualFold(runtimeType, "docker") && strings.TrimSpace(image) == "" {
+		logger.Error(nil, "Image is required when runtime is docker", "runtime", runtimeType)
 		return fmt.Errorf("--image is required when --runtime=docker")
 	}
 
 	// Validate transport type
 	validTransports := map[string]bool{"stdio": true, "http": true, "streamable-http": true}
 	if !validTransports[transport] {
+		logger.Error(nil, "Invalid transport type", "transport", transport, "validOptions", "stdio, http, streamable-http")
 		return fmt.Errorf("unsupported transport type: %s. Valid options: stdio, http, streamable-http", transport)
 	}
 
@@ -277,24 +290,30 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 
 	// Validate gateway configuration
 	if gateway {
+		logger.V(1).Info("Validating gateway configuration")
 		if gatewayImage == "" {
+			logger.Error(nil, "Gateway image is required when gateway is enabled")
 			return fmt.Errorf("--gateway-image is required when --gateway is enabled")
 		}
 		if gatewayPort == 0 {
+			logger.Error(nil, "Gateway port is required when gateway is enabled")
 			return fmt.Errorf("--gateway-port is required when --gateway is enabled")
 		}
 	}
 
 	// Validate Istio configuration
 	if istio && !gateway {
+		logger.Error(nil, "Istio requires gateway to be enabled")
 		return fmt.Errorf("--istio requires --gateway to be enabled")
 	}
 
 	// Parse and validate ports
+	logger.V(1).Info("Parsing port specifications", "portsCount", len(ports))
 	var parsedPorts []mcpv1.PortSpec
 	for _, portStr := range ports {
 		portSpec, err := parsePortSpec(portStr)
 		if err != nil {
+			logger.Error(err, "Failed to parse port specification", "portSpec", portStr)
 			return fmt.Errorf("invalid --ports entry '%s': %w", portStr, err)
 		}
 		parsedPorts = append(parsedPorts, portSpec)
@@ -412,26 +431,33 @@ func runDeploy(serverName, registryName, namespace, kubeconfig string, timeout t
 	}
 
 	// Create Kubernetes client
+	logger.V(1).Info("Creating Kubernetes client", "kubeconfig", kubeconfig)
 	k8sClient, err := createKubernetesClient(kubeconfig)
 	if err != nil {
+		logger.Error(err, "Failed to create Kubernetes client", "kubeconfig", kubeconfig)
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
+	logger.V(1).Info("Successfully created Kubernetes client")
 
 	// Create the MCPServer resource
 	fmt.Printf("Creating MCPServer resource '%s' in namespace '%s'...\n", serverName, namespace)
+	logger.Info("Creating MCPServer resource", "name", serverName, "namespace", namespace)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	err = k8sClient.Create(ctx, mcpServer)
 	if err != nil {
-		return fmt.Errorf("failed to create MCPServer resource: %w", err)
+		logger.Error(err, "Failed to create MCPServer resource", "name", serverName, "namespace", namespace)
+		return fmt.Errorf("create MCPServer %s/%s: %w", mcpServer.Namespace, mcpServer.Name, err)
 	}
 
 	fmt.Printf("✓ MCPServer '%s' created successfully\n", serverName)
+	logger.Info("Successfully created MCPServer resource", "name", serverName, "namespace", namespace)
 
 	if wait {
 		fmt.Printf("Waiting for MCPServer '%s' to be ready (timeout: %v)...\n", serverName, waitTimeout)
+		logger.Info("Waiting for MCPServer to be ready", "name", serverName, "timeout", waitTimeout)
 		return waitForMCPServerReady(k8sClient, serverName, namespace, waitTimeout)
 	}
 
@@ -484,8 +510,8 @@ metadata:
     mcp.allbeone.io/deployed-at: %s
 spec:
   registry:
-    registry: %s
-    server: %s
+    registryName: %s
+    serverName: %s
   runtime:
     type: %s`,
 		"mcp.allbeone.io/v1",
@@ -498,7 +524,7 @@ spec:
 		mcpServer.Labels["app.kubernetes.io/created-by"],
 		mcpServer.Annotations["mcp.allbeone.io/deployed-by"],
 		mcpServer.Annotations["mcp.allbeone.io/deployed-at"],
-		mcpServer.Spec.Registry.Registry,
+		mcpServer.Spec.Registry.RegistryName,
 		mcpServer.Spec.Registry.ServerName,
 		mcpServer.Spec.Runtime.Type,
 	)

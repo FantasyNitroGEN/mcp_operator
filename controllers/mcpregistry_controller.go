@@ -162,11 +162,18 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		LastUpdated:  time.Now(),
 		ServersCount: syncResult.ServersCount,
 		Servers:      syncResult.Servers,
-		Metadata: map[string]string{
-			"source": mcpRegistry.Spec.Source.Github.Repo,
-			"branch": mcpRegistry.Spec.Source.Github.Branch,
-			"path":   mcpRegistry.Spec.Source.Path,
-		},
+		Metadata:     make(map[string]string),
+	}
+
+	// Safely populate metadata based on configuration type
+	if mcpRegistry.Spec.URL != "" {
+		registryIndex.Metadata["url"] = mcpRegistry.Spec.URL
+	} else if mcpRegistry.Spec.Source != nil && mcpRegistry.Spec.Source.Github != nil {
+		registryIndex.Metadata["source"] = mcpRegistry.Spec.Source.Github.Repo
+		registryIndex.Metadata["branch"] = mcpRegistry.Spec.Source.Github.Branch
+		if mcpRegistry.Spec.Source.Path != "" {
+			registryIndex.Metadata["path"] = mcpRegistry.Spec.Source.Path
+		}
 	}
 
 	// Cache the registry index
@@ -176,24 +183,23 @@ func (r *MCPRegistryReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Convert MCPServerInfo to RegistryServer for status
+	// Only include servers that have valid server.yaml files (those in ServerSpecs)
 	var registryServers []mcpv1.RegistryServer
 	for _, server := range syncResult.Servers {
-		registryServer := mcpv1.RegistryServer{
-			Name: server.Name,
-			Path: server.Path,
-		}
-
-		// Add additional info from server spec if available
+		// Only include servers that have valid server specs
 		if serverSpec, ok := syncResult.ServerSpecs[server.Name]; ok {
-			registryServer.Title = serverSpec.Name
-			registryServer.Description = serverSpec.Description
-			registryServer.Version = serverSpec.Version
+			registryServer := mcpv1.RegistryServer{
+				Name:        server.Name,
+				Path:        server.Path,
+				Title:       serverSpec.Name,
+				Description: serverSpec.Description,
+				Version:     serverSpec.Version,
+			}
 			if len(serverSpec.Keywords) > 0 {
 				registryServer.Tags = serverSpec.Keywords
 			}
+			registryServers = append(registryServers, registryServer)
 		}
-
-		registryServers = append(registryServers, registryServer)
 	}
 
 	// Update status with sync results
