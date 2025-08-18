@@ -82,15 +82,21 @@ func (s *DefaultAutoUpdateService) CheckForUpdates(ctx context.Context) error {
 	// Check each MCPServer for updates
 	for _, mcpServer := range mcpServerList.Items {
 		// Skip servers without registry configuration
-		if mcpServer.Spec.Registry == nil || mcpServer.Spec.Registry.Registry == "" {
+		if mcpServer.Spec.Registry == nil || (mcpServer.Spec.Registry.Registry == "" && mcpServer.Spec.Registry.Name == "") {
 			continue
+		}
+
+		// Get registry name for logging (prefer new field, fall back to old)
+		registryName := mcpServer.Spec.Registry.Name
+		if registryName == "" && mcpServer.Spec.Registry.Registry != "" {
+			registryName = mcpServer.Spec.Registry.Registry
 		}
 
 		serverKey := fmt.Sprintf("%s/%s", mcpServer.Namespace, mcpServer.Name)
 		serverLogger := logger.WithValues(
 			"mcpserver", mcpServer.Name,
 			"namespace", mcpServer.Namespace,
-			"registry", mcpServer.Spec.Registry.Registry,
+			"registry", registryName,
 		)
 
 		// Check if server is in backoff period
@@ -166,10 +172,16 @@ func (s *DefaultAutoUpdateService) CheckForUpdates(ctx context.Context) error {
 
 // UpdateServerFromTemplate updates a specific MCPServer with latest template data
 func (s *DefaultAutoUpdateService) UpdateServerFromTemplate(ctx context.Context, mcpServer *mcpv1.MCPServer) (bool, error) {
+	// Get registry name for logging (prefer new field, fall back to old)
+	registryName := mcpServer.Spec.Registry.Name
+	if registryName == "" && mcpServer.Spec.Registry.Registry != "" {
+		registryName = mcpServer.Spec.Registry.Registry
+	}
+
 	logger := log.FromContext(ctx).WithValues(
 		"mcpserver", mcpServer.Name,
 		"namespace", mcpServer.Namespace,
-		"registry", mcpServer.Spec.Registry.Registry,
+		"registry", registryName,
 	)
 
 	// Check if update is required
@@ -233,10 +245,16 @@ func (s *DefaultAutoUpdateService) UpdateServerFromTemplate(ctx context.Context,
 
 // IsUpdateRequired checks if an MCPServer needs updating based on registry template
 func (s *DefaultAutoUpdateService) IsUpdateRequired(ctx context.Context, mcpServer *mcpv1.MCPServer) (bool, *registry.MCPServerSpec, error) {
+	// Get registry name for logging (prefer new field, fall back to old)
+	registryName := mcpServer.Spec.Registry.Name
+	if registryName == "" && mcpServer.Spec.Registry.Registry != "" {
+		registryName = mcpServer.Spec.Registry.Registry
+	}
+
 	logger := log.FromContext(ctx).WithValues(
 		"mcpserver", mcpServer.Name,
 		"namespace", mcpServer.Namespace,
-		"registry", mcpServer.Spec.Registry.Registry,
+		"registry", registryName,
 	)
 
 	// Skip if no registry is configured - use current fields only
@@ -244,8 +262,8 @@ func (s *DefaultAutoUpdateService) IsUpdateRequired(ctx context.Context, mcpServ
 		return false, nil, nil
 	}
 
-	// Fetch latest server specification from registry - use current fields only
-	registryName := mcpServer.Spec.Registry.Name
+	// Fetch latest server specification from registry - registryName already set above
+	// if registryName is still empty, fall back to Registry field
 	if registryName == "" {
 		registryName = mcpServer.Spec.Registry.Registry
 	}
