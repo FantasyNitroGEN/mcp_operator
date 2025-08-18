@@ -126,6 +126,23 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			serverName = mcpServer.Name
 		}
 	}
+
+	// --- normalize Spec.Registry.Name for services that read only .Name ---
+	if mcpServer.Spec.Registry != nil &&
+		mcpServer.Spec.Registry.Name == "" &&
+		mcpServer.Spec.Registry.Registry != "" {
+		orig := mcpServer.DeepCopy()
+		mcpServer.Spec.Registry.Name = mcpServer.Spec.Registry.Registry
+		// опционально можно зачистить устаревшее поле:
+		// mcpServer.Spec.Registry.Registry = ""
+		if err := r.Patch(ctx, mcpServer, client.MergeFrom(orig)); err != nil {
+			logger.Error(err, "Failed to normalize Spec.Registry.Name")
+			return ctrl.Result{}, err
+		}
+		registryName = mcpServer.Spec.Registry.Name
+		logger.Info("Normalized Spec.Registry.Name from deprecated field", "registry_name", registryName)
+	}
+
 	logger = logger.WithValues(
 		"generation", mcpServer.Generation,
 		"resource_version", mcpServer.ResourceVersion,
@@ -739,7 +756,7 @@ func (r *MCPServerReconciler) GetMCPServerByNameIndexed(ctx context.Context, nam
 func (r *MCPServerReconciler) ListMCPServersByRegistryIndexed(ctx context.Context, registryName, namespace string) (*mcpv1.MCPServerList, error) {
 	mcpServerList := &mcpv1.MCPServerList{}
 	listOpts := []client.ListOption{
-		client.MatchingFields{"spec.registry.registry": registryName},
+		client.MatchingFields{"spec.registry.name": registryName},
 	}
 
 	if namespace != "" {
@@ -760,7 +777,7 @@ func (r *MCPServerReconciler) ListMCPServersEfficient(ctx context.Context, names
 
 	// Use indexed field if registry name is specified
 	if registryName != "" {
-		listOpts = append(listOpts, client.MatchingFields{"spec.registry.registry": registryName})
+		listOpts = append(listOpts, client.MatchingFields{"spec.registry.name": registryName})
 	}
 
 	if namespace != "" {
@@ -811,7 +828,7 @@ func (r *MCPServerReconciler) applyRenderedResources(ctx context.Context, logger
 		labels["mcp.allbeone.io/hash"] = renderedHash
 		resource.SetLabels(labels)
 
-		// Add required annotation
+		// Add the required annotation
 		annotations := resource.GetAnnotations()
 		if annotations == nil {
 			annotations = make(map[string]string)
@@ -890,7 +907,7 @@ func (r *MCPServerReconciler) isDeploymentRollingUpdate(deployment *appsv1.Deplo
 		return true
 	}
 
-	// If updated replicas is less than desired, update is in progress
+	// If updated replicas is less than desired, an update is in progress
 	if deployment.Status.UpdatedReplicas < desiredReplicas && deployment.Status.UpdatedReplicas > 0 {
 		return true
 	}
@@ -900,7 +917,7 @@ func (r *MCPServerReconciler) isDeploymentRollingUpdate(deployment *appsv1.Deplo
 		return true
 	}
 
-	// Check if deployment generation is newer than observed generation
+	// Check if the deployment generation is newer than the observed generation
 	// This indicates a spec change that hasn't been fully processed yet
 	if deployment.Generation > deployment.Status.ObservedGeneration {
 		return true
