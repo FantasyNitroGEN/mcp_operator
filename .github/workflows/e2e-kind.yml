@@ -349,10 +349,10 @@ jobs:
             --runtime docker \
             --transport stdio \
             --image mcp/postgres \
-            --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}' \
-            --wait --timeout 300s
+            --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}'
 
       - name: Validate & dump on failure (single step)
+        if: ${{ always() }}
         run: |
           set +e
           echo "== MCPServer list =="
@@ -416,7 +416,7 @@ jobs:
           exit $RC
 
       - name: Upload diagnostics artifact
-        if: ${{ failure() }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: e2e-kind-diagnostics
