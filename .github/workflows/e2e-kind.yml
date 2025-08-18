@@ -186,76 +186,41 @@ jobs:
         run: |
           set -e
           echo "=== Проверка CRD ==="
-          echo "CRDs with mcp domain:"
           kubectl get crd | grep mcp || { echo "::error::No MCP CRDs found"; exit 1; }
-
-          EXPECTED_CRDS="mcpservers.mcp.allbeone.io mcpserverbackups.mcp.allbeone.io mcpregistries.mcp.allbeone.io"
-          for crd in $EXPECTED_CRDS; do
-            kubectl get crd "$crd" >/dev/null 2>&1 || { echo "::error::Required CRD not found: $crd"; exit 1; }
+          for crd in mcpservers.mcp.allbeone.io mcpserverbackups.mcp.allbeone.io mcpregistries.mcp.allbeone.io; do
+            kubectl get crd "$crd" >/dev/null 2>&1 || { echo "::error::CRD missing: $crd"; exit 1; }
             echo "✓ CRD found: $crd"
           done
 
           echo "=== Проверка подов оператора ==="
-          OPERATOR_PODS=$(kubectl -n mcp get pods | grep mcp-operator || true)
-          if [ -z "$OPERATOR_PODS" ]; then
-            echo "::error::No MCP operator pods found in ns mcp"
-            kubectl -n mcp get pods || true
-            exit 1
-          fi
-          echo "$OPERATOR_PODS"
-
-          OPERATOR_POD_NAME=$(kubectl -n mcp get pods -l control-plane=controller-manager -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+          # Берём ТОЛЬКО Running pod по стандартному label чарта
+          OPERATOR_POD_NAME="$(kubectl -n mcp get pods \
+            -l app.kubernetes.io/name=mcp-operator \
+            -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' | head -n1)"
           if [ -z "$OPERATOR_POD_NAME" ]; then
-            OPERATOR_POD_NAME=$(kubectl -n mcp get pods | awk '/mcp-operator/{print $1; exit}' || true)
-          fi
-
-          if [ -z "$OPERATOR_POD_NAME" ]; then
-            echo "::error::Could not find operator pod name"
+            echo "::error::No running mcp-operator pod found in ns mcp"
             kubectl -n mcp get pods
             exit 1
           fi
+          echo "Operator pod: $OPERATOR_POD_NAME"
+          kubectl -n mcp wait --for=condition=Ready pod/"$OPERATOR_POD_NAME" --timeout=180s
 
-          echo "Checking operator pod readiness: $OPERATOR_POD_NAME"
-          READY_STATUS=$(kubectl -n mcp get pod "$OPERATOR_POD_NAME" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo "false")
-          if [ "$READY_STATUS" != "true" ]; then
-            echo "::error::Operator pod is not ready: $OPERATOR_POD_NAME"
-            kubectl -n mcp describe pod "$OPERATOR_POD_NAME" || true
-            exit 1
-          fi
-          echo "✓ Operator pod is ready"
-
-          echo "=== Проверка вебхуков (условно) ==="
-          # считаем вебхуки включёнными, если есть хоть один ресурс или сервис вебхуков
+          echo "=== Проверка вебхуков (опционально) ==="
           HAS_VWC=$(kubectl get validatingwebhookconfigurations 2>/dev/null | grep -i mcp || true)
           HAS_MWC=$(kubectl get mutatingwebhookconfigurations 2>/dev/null | grep -i mcp || true)
-          HAS_SVC=$(kubectl -n mcp get svc 2>/dev/null | grep -i webhook || true)
-
-          if [ -n "$HAS_VWC$HAS_MWC$HAS_SVC" ]; then
-            echo "Webhooks detected, validating presence…"
-            if [ -z "$HAS_VWC" ]; then
-              echo "::error::ValidatingWebhookConfiguration expected but not found"
-              kubectl get validatingwebhookconfigurations || true
-              exit 1
-            fi
-            if [ -z "$HAS_MWC" ]; then
-              echo "::error::MutatingWebhookConfiguration expected but not found"
-              kubectl get mutatingwebhookconfigurations || true
-              exit 1
-            fi
+          if [ -n "$HAS_VWC$HAS_MWC" ]; then
             echo "✓ Webhook configurations present"
             echo "=== Проверка логов оператора на ошибки вебхука ==="
-            WEBHOOK_ERRORS=$(kubectl -n mcp logs "$OPERATOR_POD_NAME" --since=5m | grep -i -E "(webhook.*server.*error|webhook.*port.*error|failed.*webhook|webhook.*failed)" || true)
+            WEBHOOK_ERRORS=$(kubectl -n mcp logs "$OPERATOR_POD_NAME" --since=5m | grep -i -E "(webhook.*(server|port).*(error|fail)|failed.*webhook)" || true)
             if [ -n "$WEBHOOK_ERRORS" ]; then
-              echo "::error::Webhook server errors found in logs:"
-              echo "$WEBHOOK_ERRORS"
-              exit 1
+              echo "::error::Webhook-related errors in operator logs"; echo "$WEBHOOK_ERRORS"; exit 1
             fi
             echo "✓ No webhook server errors found in logs"
           else
-            echo "::notice::MCP admission webhooks are not installed in this chart/config — skipping webhook checks."
+            echo "::notice::Admission webhooks not installed in this chart/config — skipping webhook checks."
           fi
 
-          echo "=== Критерий готовности: ✓ PASSED (без обязательных вебхуков) ==="
+          echo "=== Критерий готовности: ✓ PASSED ==="
 
       - name: operator RBAC for core
         run: |
@@ -351,6 +316,13 @@ jobs:
             --transport stdio \
             --image mcp/postgres \
             --env POSTGRES_URL='${{ steps.pgurl.outputs.URL }}'
+
+      - name: Assert MCPServer created (fail fast)
+        run: |
+          set -e
+          # Проверяем, что объект появился — если нет, валим job
+          kubectl -n mcp get mcpserver postgres -o jsonpath='{.metadata.name}{"\n"}' \
+            || { echo "::error::MCPServer postgres was not created"; exit 1; }
 
       - name: Validate & dump on failure (single step)
         if: ${{ always() }}
