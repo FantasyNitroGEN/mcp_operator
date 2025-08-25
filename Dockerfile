@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Build the manager binary
 # Билдер ВСЕГДА на билдер-платформе (x86_64 runner), без эмуляции
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG BUILDPLATFORM
