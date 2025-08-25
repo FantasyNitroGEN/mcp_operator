@@ -81,7 +81,7 @@ jobs:
           run-tests: "false"
       - run: go install github.com/securego/gosec/v2/cmd/gosec@latest
       - run: gosec -no-fail -fmt sarif -out gosec.sarif ./...
-      - uses: github/codeql-action/upload-sarif@df559355d593797519d70b90fc8edd5db049e7a2 # v3
+      - uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3
         if: always() && hashFiles('gosec.sarif') != ''
         with:
           sarif_file: gosec.sarif
