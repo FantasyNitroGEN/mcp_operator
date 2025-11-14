@@ -106,7 +106,7 @@ jobs:
 
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2
+        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
@@ -189,7 +189,7 @@ jobs:
           CGO_ENABLED=0 go build -a -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o "dist/${binary_name}" cmd/manager/main.go
 
       - name: Upload binary to release
-        uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2
+        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2
         with:
           files: dist/*
 
@@ -235,7 +235,7 @@ jobs:
           ./bin/kustomize build config/default | sed 's/ClusterRole/Role/g; s/ClusterRoleBinding/RoleBinding/g' > dist/install-namespaced.yaml
 
       - name: Upload manifests to release
-        uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2
+        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2
         with:
           files: |
             dist/install.yaml
