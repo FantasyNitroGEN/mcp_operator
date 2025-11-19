@@ -7,7 +7,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
     - uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1.13.0
       with: { wait: 300s, cluster_name: mcp-e2e }
     - shell: bash
