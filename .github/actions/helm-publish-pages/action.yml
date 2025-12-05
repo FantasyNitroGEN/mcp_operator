@@ -5,7 +5,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+    - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
     - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
       with:
         version: ${{ inputs.helm-version }}
@@ -26,7 +26,7 @@ runs:
         cd gh-pages-charts
         helm repo index . --url "https://${OWNER_LOWER}.github.io/${REPO}/"
     - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-    - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+    - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
       with:
         path: gh-pages-charts
     - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
