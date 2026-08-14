@@ -12,7 +12,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
     - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
       with:
         version: ${{ inputs.helm-version }}
@@ -34,7 +34,7 @@ runs:
           ct lint --target-branch "${{ inputs.ct-target-branch }}" || true
         fi
     - if: ${{ inputs.run-install == 'true' }}
-      uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1.13.0
+      uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
       with:
         wait: 300s
     - if: ${{ inputs.run-install == 'true' }}
