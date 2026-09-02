@@ -5,7 +5,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+    - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -16,7 +16,7 @@ runs:
         format: sarif
         output: trivy-image.sarif
     - if: always() && hashFiles('trivy-image.sarif') != ''
-      uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+      uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
       with:
         sarif_file: trivy-image.sarif
         category: trivy-docker
