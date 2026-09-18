@@ -16,7 +16,7 @@ runs:
         format: sarif
         output: trivy-image.sarif
     - if: always() && hashFiles('trivy-image.sarif') != ''
-      uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
+      uses: github/codeql-action/upload-sarif@3ea06614dafe36dec890db3446326e0d40ce53d4 # v3
       with:
         sarif_file: trivy-image.sarif
         category: trivy-docker

@@ -8,7 +8,7 @@ runs:
   using: composite
   steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-    - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+    - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
       with: { wait: 300s, cluster_name: mcp-e2e }
     - shell: bash
       run: kubectl create namespace "${{ inputs.namespace }}" || true
